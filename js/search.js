@@ -162,7 +162,7 @@
 		// the alias text before any other passes.
 		var queryAlias;
 		if (query in BattleAliases) {
-			if (toId(BattleAliases[query]).slice(0, query.length) !== query) {
+			if (query === 'sub' || toId(BattleAliases[query]).slice(0, query.length) !== query) {
 				queryAlias = toId(BattleAliases[query]);
 				if (queryAlias.slice(0, 11) !== 'hiddenpower') {
 					searchPasses.unshift([1, Search.getClosest(queryAlias), queryAlias]);
@@ -585,6 +585,7 @@
 					if (!(learnsetid in BattleTeambuilderTable.learnsets)) {
 						learnsetid = toId(BattlePokedex[learnsetid].baseSpecies);
 					}
+					if (!learnsetid) continue; // Pokestar Pokemon
 					while (true) {
 						var learnset = BattleTeambuilderTable.learnsets[learnsetid];
 						if (learnset && (filters[i][1] in learnset) && learnset[filters[i][1]].indexOf(genChar) >= 0) {
@@ -776,6 +777,8 @@
 		if (format.slice(0, 3) === 'gen') {
 			this.gen = (Number(format.charAt(3)) || 6);
 			format = format.slice(4);
+		} else if (!format) {
+			this.gen = 7;
 		}
 		var requirePentagon = (format === 'vgc2016');
 		var template;
@@ -789,7 +792,7 @@
 			if (this.gen === 7 && format.indexOf('vgc') >= 0) {
 				table = table['gen' + this.gen + 'vgc'];
 				isDoubles = true;
-			} else if (this.gen === 6 && format.indexOf('doubles') >= 0 || format.indexOf('vgc') >= 0 || format.indexOf('triples') >= 0) {
+			} else if (table['gen' + this.gen + 'doubles'] && format.indexOf('doubles') >= 0 || format.indexOf('vgc') >= 0 || format.indexOf('triples') >= 0) {
 				table = table['gen' + this.gen + 'doubles'];
 				isDoubles = true;
 			} else if (this.gen < 7) {
@@ -806,11 +809,9 @@
 			var tierSet = table.tierSet;
 			var slices = table.formatSlices;
 			var agTierSet = [];
-			if (this.gen === 6) agTierSet = [['header', "AG"], ['pokemon', 'rayquazamega']];
+			if (this.gen >= 6) agTierSet = [['header', "AG"], ['pokemon', 'rayquazamega']];
 			if (format === 'ubers' || format === 'uber') tierSet = tierSet.slice(slices.Uber);
-			else if (this.gen === 7 && format === 'vgc2017') tierSet = tierSet.slice(slices.Legal);
-			else if (this.gen === 7 && (format === 'pokebankubers' || format === 'pokebankanythinggoes')) tierSet = tierSet.slice(slices.Uber);
-			else if (this.gen === 7) tierSet = tierSet.slice(slices.New);
+			else if (format === 'vgc2017') tierSet = tierSet.slice(slices.Legal);
 			else if (format === 'ou') tierSet = tierSet.slice(slices.OU);
 			else if (format === 'uu') tierSet = tierSet.slice(slices.UU);
 			else if (format === 'ru') tierSet = tierSet.slice(slices.RU);
@@ -882,6 +883,7 @@
 				template = Tools.getTemplate(template.baseSpecies);
 			}
 			var moves = [];
+			var sMoves = [];
 			var sketch = false;
 			var gen = '' + this.gen;
 			while (true) {
@@ -911,23 +913,44 @@
 				}
 			}
 			if (sketch) {
-				moves = [];
 				for (var i in BattleMovedex) {
-					if (i === 'chatter' || i === 'magikarpsrevenge' || i === 'paleowave' || i === 'shadowstrike') continue;
-					moves.push(i);
+					if (i === 'chatter' || i === 'magikarpsrevenge' || (format.substr(0, 3) !== 'cap' && (i === 'paleowave' || i === 'shadowstrike'))) continue;
+					if (!BattleMovedex[i].gen) {
+						if (BattleMovedex[i].num >= 622) {
+							BattleMovedex[i].gen = 7;
+						} else if (BattleMovedex[i].num >= 560) {
+							BattleMovedex[i].gen = 6;
+						} else if (BattleMovedex[i].num >= 468) {
+							BattleMovedex[i].gen = 5;
+						} else if (BattleMovedex[i].num >= 355) {
+							BattleMovedex[i].gen = 4;
+						} else if (BattleMovedex[i].num >= 252) {
+							BattleMovedex[i].gen = 3;
+						} else if (BattleMovedex[i].num >= 166) {
+							BattleMovedex[i].gen = 2;
+						} else if (BattleMovedex[i].num >= 1) {
+							BattleMovedex[i].gen = 1;
+						} else {
+							BattleMovedex[i].gen = 0;
+						}
+					}
+					if (BattleMovedex[i].gen > this.gen) continue;
+					if (BattleMovedex[i].isZ) continue;
+					sMoves.push(i);
 				}
 			}
 
 			moves.sort();
+			sMoves.sort();
 
 			var usableMoves = [];
 			var uselessMoves = [];
+			var sketchedMoves = [];
 			for (var i = 0; i < moves.length; i++) {
 				var id = moves[i];
 				var isViable = BattleMovedex[id] && BattleMovedex[id].isViable;
 				if (id === 'aerialace') isViable = (toId(set.ability) === 'technician');
 				if (id === 'bellydrum') isViable = (toId(set.species) in {azumarill:1, linoone:1, slurpuff:1});
-				if (id === 'clamp' || id === 'hyperbeam' || id === 'wrap') isViable = (this.gen === 1);
 				if (id === 'counter') isViable = (toId(set.species) in {chansey:1, skarmory:1, clefable:1, wobbuffet:1});
 				if (id === 'dynamicpunch') isViable = (toId(set.ability) === 'noguard');
 				if (id === 'focuspunch') isViable = (toId(set.species) === 'breloom');
@@ -937,12 +960,30 @@
 				if (id === 'hiddenpowerfire') isViable = (moves.indexOf('flamethrower') < 0);
 				if (id === 'hiddenpowergrass') isViable = (moves.indexOf('energyball') < 0 && moves.indexOf('gigadrain') < 0);
 				if (id === 'hiddenpowerice') isViable = (moves.indexOf('icebeam') < 0 && template.id !== 'xerneas');
+				if (id === 'hypnosis') isViable = (this.gen < 4 && moves.indexOf('sleeppowder') < 0);
 				if (id === 'icywind') isViable = (toId(set.species).substr(0, 6) === 'keldeo');
+				if (id === 'jumpkick') isViable = (moves.indexOf('highjumpkick') < 0);
+				if (id === 'leechlife') isViable = (this.gen > 6);
 				if (id === 'reflecttype') isViable = (toId(set.species) in {latias:1, starmie:1});
 				if (id === 'selfdestruct') isViable = (this.gen < 5 && moves.indexOf('explosion') < 0);
 				if (id === 'skyattack') isViable = (toId(set.species) === 'hawlucha');
 				if (id === 'stunspore') isViable = (moves.indexOf('thunderwave') < 0);
-				if (id === 'toxic') isViable = (this.gen > 1);
+				if (this.gen === 1) {
+					// Usually viable for Gen 1
+					if (id === 'acidarmor' || id === 'amnesia' || id === 'barrier' || id === 'bind' || id === 'clamp' || id === 'confuseray' || id === 'counter' || id === 'firespin' || id === 'hyperbeam' || id === 'mirrormove' || id === 'pinmissile' || id === 'razorleaf' || id === 'sing' || id === 'slash' || id === 'sludge' || id === 'twineedle' || id === 'wrap') isViable = true;
+
+					// Usually not viable for Gen 1
+					if (id === 'disable' || id === 'firepunch' || id === 'icepunch' || id === 'leechseed' || id === 'quickattack' || id === 'roar' || id === 'thunderpunch' || id === 'toxic' || id === 'triattack' || id === 'whirlwind') isViable = false;
+
+					// Viable only when certain moves aren't present
+					if (id === 'bubblebeam') isViable = ((moves.indexOf('surf') < 0 && moves.indexOf('blizzard') < 0));
+					if (id === 'doubleedge') isViable = (moves.indexOf('bodyslam') < 0);
+					if (id === 'doublekick') isViable = (moves.indexOf('submission') < 0);
+					if (id === 'megadrain') isViable = (moves.indexOf('razorleaf') < 0 && moves.indexOf('surf') < 0);
+					if (id === 'megakick') isViable = (moves.indexOf('hyperbeam') < 0);
+					if (id === 'reflect') isViable = (moves.indexOf('barrier') < 0 && moves.indexOf('acidarmor') < 0);
+					if (id === 'submission') isViable = (moves.indexOf('highjumpkick') < 0);
+				}
 				if (isViable) {
 					if (!usableMoves.length) usableMoves.push(['header', "Moves"]);
 					usableMoves.push(['move', id]);
@@ -951,7 +992,12 @@
 					uselessMoves.push(['move', id]);
 				}
 			}
-			this.defaultResultSet = usableMoves.concat(uselessMoves);
+			for (var i = 0; i < sMoves.length; i++) {
+				var id = sMoves[i];
+				if (!sketchedMoves.length) sketchedMoves.push(['header', "Sketched moves"]);
+				sketchedMoves.push(['move', id]);
+			}
+			this.defaultResultSet = usableMoves.concat(uselessMoves).concat(sketchedMoves);
 			break;
 		}
 
@@ -1403,7 +1449,7 @@
 		}
 		buf += '<span class="col labelcol">' + (move.category !== 'Status' ? ('<em>Power</em><br />' + (basePower || '&mdash;')) : '') + '</span> ';
 		buf += '<span class="col widelabelcol"><em>Accuracy</em><br />' + (accuracy && accuracy !== true ? accuracy + '%' : '&mdash;') + '</span> ';
-		buf += '<span class="col pplabelcol"><em>PP</em><br />' + (pp !== 1 ? pp * 8 / 5 : pp) + '</span> ';
+		buf += '<span class="col pplabelcol"><em>PP</em><br />' + (pp === 1 || move.noPPBoosts ? pp : pp * 8 / 5) + '</span> ';
 
 		// desc
 		var desc = (move.shortDesc || move.desc);
@@ -1447,7 +1493,7 @@
 		// power, accuracy, pp
 		buf += '<span class="col labelcol">' + (move.category !== 'Status' ? ('<em>Power</em><br />' + (move.basePower || '&mdash;')) : '') + '</span> ';
 		buf += '<span class="col widelabelcol"><em>Accuracy</em><br />' + (move.accuracy && move.accuracy !== true ? move.accuracy + '%' : '&mdash;') + '</span> ';
-		buf += '<span class="col pplabelcol"><em>PP</em><br />' + (move.pp !== 1 ? move.pp * 8 / 5 : move.pp) + '</span> ';
+		buf += '<span class="col pplabelcol"><em>PP</em><br />' + (move.pp === 1 || move.noPPBoosts ? move.pp : move.pp * 8 / 5) + '</span> ';
 
 		// desc
 		buf += '<span class="col movedesccol">' + Tools.escapeHTML(move.shortDesc || move.desc) + '</span> ';

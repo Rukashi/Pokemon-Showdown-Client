@@ -268,61 +268,66 @@ var BattleStatNames = { // proper style
 	spe: 'Spe'
 };
 
-var baseSpeciesChart = {
-	'pikachu': 1,
-	'pichu': 1,
-	'unown': 1,
-	'castform': 1,
-	'deoxys': 1,
-	'burmy': 1,
-	'wormadam': 1,
-	'cherrim': 1,
-	'shellos': 1,
-	'gastrodon': 1,
-	'rotom': 1,
-	'giratina': 1,
-	'shaymin': 1,
-	'arceus': 1,
-	'basculin': 1,
-	'darmanitan': 1,
-	'deerling': 1,
-	'sawsbuck': 1,
-	'tornadus': 1,
-	'thundurus': 1,
-	'landorus': 1,
-	'kyurem': 1,
-	'keldeo': 1,
-	'meloetta': 1,
-	'genesect': 1,
-	'vivillon': 1,
-	'flabebe': 1,
-	'floette': 1,
-	'florges': 1,
-	'furfrou': 1,
-	'aegislash': 1,
-	'pumpkaboo': 1,
-	'gourgeist': 1,
-	'meowstic': 1,
-	'hoopa': 1,
-	'minior': 1,
-	'mimikyu': 1,
+var baseSpeciesChart = [
+	'pikachu',
+	'pichu',
+	'unown',
+	'castform',
+	'deoxys',
+	'burmy',
+	'wormadam',
+	'cherrim',
+	'shellos',
+	'gastrodon',
+	'rotom',
+	'giratina',
+	'shaymin',
+	'arceus',
+	'basculin',
+	'darmanitan',
+	'deerling',
+	'sawsbuck',
+	'tornadus',
+	'thundurus',
+	'landorus',
+	'kyurem',
+	'keldeo',
+	'meloetta',
+	'genesect',
+	'vivillon',
+	'flabebe',
+	'floette',
+	'florges',
+	'furfrou',
+	'aegislash',
+	'pumpkaboo',
+	'gourgeist',
+	'meowstic',
+	'hoopa',
+	'zygarde',
+	'lycanroc',
+	'wishiwashi',
+	'minior',
+	'mimikyu',
+	'greninja',
+	'oricorio',
+	'silvally',
 
 	// mega evolutions
-	'charizard': 1,
-	'mewtwo': 1
+	'charizard',
+	'mewtwo'
 	// others are hardcoded by ending with 'mega'
-};
+];
 
 // Precompile often used regular expression for links.
 var domainRegex = '[a-z0-9\\-]+(?:[.][a-z0-9\\-]+)*';
 var parenthesisRegex = '[(](?:[^\\s()<>&]|&amp;)*[)]';
 var linkRegex = new RegExp(
-	'\\b' +
 	'(?:' +
 		'(?:' +
 			// When using www. or http://, allow any-length TLD (like .museum)
-			'(?:https?://|www[.])' + domainRegex +
-			'|' + domainRegex + '[.]' +
+			'(?:https?://|\\bwww[.])' + domainRegex +
+			'|\\b' + domainRegex + '[.]' +
 				// Allow a common TLD, or any 2-3 letter TLD followed by : or /
 				'(?:com?|org|net|edu|info|us|jp|[a-z]{2,3}(?=[:/]))' +
 		')' +
@@ -332,13 +337,13 @@ var linkRegex = new RegExp(
 			'/' +
 			'(?:' +
 				'(?:' +
-					'[^\\s()&]|&amp;|&quot;' +
+					'[^\\s()&<>]|&amp;|&quot;' +
 					'|' + parenthesisRegex +
 				')*' +
 				// URLs usually don't end with punctuation, so don't allow
 				// punctuation symbols that probably aren't related to URL.
 				'(?:' +
-					'[^\\s`()\\[\\]{}\'".,!?;:&]' +
+					'[^\\s`()\\[\\]{}\'".,!?;:&<>]' +
 					'|' + parenthesisRegex +
 				')' +
 			')?' +
@@ -481,22 +486,17 @@ var Tools = {
 			buf += '</span> ';
 			buf += '<span style="float:left;min-height:26px">';
 			if (template.abilities['1']) {
-				buf += '<span class="col twoabilitycol">';
+				buf += '<span class="col twoabilitycol">' + template.abilities['0'] + '<br />' + template.abilities['1'] + '</span>';
 			} else {
-				buf += '<span class="col abilitycol">';
+				buf += '<span class="col abilitycol">' + template.abilities['0'] + '</span>';
 			}
-			for (var i in template.abilities) {
-				var ability = template.abilities[i];
-				if (!ability) continue;
-
-				if (i === '1') buf += '<br />';
-				if (i == 'H') {
-					ability = '</span><span class="col abilitycol"><em>' + (template.unreleasedHidden ? '<s>' + ability + '</s>' : ability) + '</em>';
-				}
-				buf += ability;
+			if (template.abilities['S']) {
+				buf += '<span class="col twoabilitycol' + (template.unreleasedHidden ? ' unreleasedhacol' : '') + '"><em>' + template.abilities['H'] + '<br />' + template.abilities['S'] + '</em></span>';
+			} else if (template.abilities['H']) {
+				buf += '<span class="col abilitycol' + (template.unreleasedHidden ? ' unreleasedhacol' : '') + '"><em>' + template.abilities['H'] + '</em></span>';
+			} else {
+				buf += '<span class="col abilitycol"></span>';
 			}
-			if (!template.abilities['H']) buf += '</span><span class="col abilitycol">';
-			buf += '</span>';
 			buf += '</span>';
 			buf += '<span style="float:left;min-height:26px">';
 			buf += '<span class="col statcol"><em>HP</em><br />' + template.baseStats.hp + '</span> ';
@@ -561,6 +561,9 @@ var Tools = {
 		// ^^superscript^^
 		str = str.replace(/\^\^([^< ](?:[^<]*?[^< ])??)\^\^/g,
 			options.hidesuperscript ? '$1' : '<sup>$1</sup>');
+		// \\subscript\\
+		str = str.replace(/\\\\([^< ](?:[^<]*?[^< ])??)\\\\/g,
+			options.hidesubscript ? '$1' : '<sub>$1</sub>');
 		// <<roomid>>
 		str = str.replace(/&lt;&lt;([a-z0-9-]+)&gt;&gt;/g,
 			options.hidelinks ? '&laquo;$1&raquo;' : '&laquo;<a href="/$1" target="_blank">$1</a>&raquo;');
@@ -619,6 +622,9 @@ var Tools = {
 			});
 			// [[blah]]
 			str = str.replace(/\[\[(?![< ])(?:(?:(youtube|yt|wiki)\: ?)?([^<`]*?[^< ])?)\]\]/g, function (match, p1, p2) {
+				if (match === '[[]]') {
+					return (p1 || '') + match + (p2 || '');
+				}
 				var query = p2;
 				if (p1 === 'wiki') {
 					query = Tools.escapeHTML(encodeURIComponent(Tools.unescapeHTML(query)));
@@ -706,14 +712,14 @@ var Tools = {
 				throw new Error('sanitizeHTML requires caja');
 			};
 		}
-		// Add <marquee> and <blink> to the whitelist.
-		// See https://developer.mozilla.org/en-US/docs/Web/HTML/Element/marquee
-		// for the list of attributes.
+		// Add <marquee> <blink> <psicon> to the whitelist.
 		$.extend(html4.ELEMENTS, {
 			'marquee': 0,
-			'blink': 0
+			'blink': 0,
+			'psicon': html4.eflags['OPTIONAL_ENDTAG'] | html4.eflags['EMPTY']
 		});
 		$.extend(html4.ATTRIBS, {
+			// See https://developer.mozilla.org/en-US/docs/Web/HTML/Element/marquee
 			'marquee::behavior': 0,
 			'marquee::bgcolor': 0,
 			'marquee::direction': 0,
@@ -724,11 +730,14 @@ var Tools = {
 			'marquee::scrolldelay': 0,
 			'marquee::truespeed': 0,
 			'marquee::vspace': 0,
-			'marquee::width': 0
+			'marquee::width': 0,
+			'psicon::pokemon': 0,
+			'psicon::item': 0
 		});
 
-		var uriRewriter = function (uri) {
-			return uri;
+		var uriRewriter = function (urlData) {
+			if (urlData.scheme_ === 'geo' || urlData.scheme_ === 'sms' || urlData.scheme_ === 'tel') return null;
+			return urlData;
 		};
 		var tagPolicy = function (tagName, attribs) {
 			if (html4.ELEMENTS[tagName] & html4.eflags['UNSAFE']) {
@@ -764,8 +773,47 @@ var Tools = {
 						}
 					}
 				}
+			} else if (tagName === 'psicon') {
+				// <psicon> is a custom element which supports a set of mutually incompatible attributes:
+				// <psicon pokemon> and <psicon item>
+				var classValueIndex = -1;
+				var styleValueIndex = -1;
+				var iconAttrib = null;
+				for (var i = 0; i < attribs.length - 1; i += 2) {
+					if (attribs[i] === 'pokemon' || attribs[i] === 'item') {
+						// If declared more than once, use the later.
+						iconAttrib = attribs.slice(i, i + 2);
+					} else if (attribs[i] === 'class') {
+						classValueIndex = i + 1;
+					} else if (attribs[i] === 'style') {
+						styleValueIndex = i + 1;
+					}
+				}
+				tagName = 'span';
+
+				if (iconAttrib) {
+					if (classValueIndex < 0) {
+						attribs.push('class', '');
+						classValueIndex = attribs.length - 1;
+					}
+					if (styleValueIndex < 0) {
+						attribs.push('style', '');
+						styleValueIndex = attribs.length - 1;
+					}
+
+					// Prepend all the classes and styles associated to the custom element.
+					if (iconAttrib[0] === 'pokemon') {
+						attribs[classValueIndex] = attribs[classValueIndex] ? 'picon ' + attribs[classValueIndex] : 'picon';
+						attribs[styleValueIndex] = attribs[styleValueIndex] ? Tools.getPokemonIcon(iconAttrib[1]) + '; ' + attribs[styleValueIndex] : Tools.getPokemonIcon(iconAttrib[1]);
+					} else if (iconAttrib[0] === 'item') {
+						attribs[classValueIndex] = attribs[classValueIndex] ? 'itemicon ' + attribs[classValueIndex] : 'itemicon';
+						attribs[styleValueIndex] = attribs[styleValueIndex] ? Tools.getItemIcon(iconAttrib[1]) + '; ' + attribs[styleValueIndex] : Tools.getItemIcon(iconAttrib[1]);
+					}
+				}
 			}
+
 			attribs = html.sanitizeAttribs(tagName, attribs, uriRewriter);
+
 			if (dataUri && tagName === 'img') {
 				attribs[srcIdx + 1] = dataUri;
 			}
@@ -777,10 +825,44 @@ var Tools = {
 					attribs.push('_blank');
 				}
 			}
-			return {attribs: attribs};
+			return {tagName: tagName, attribs: attribs};
+		};
+		var localizeTime = function (full, date, time, timezone) {
+			var parsedTime = new Date(date + 'T' + time + (timezone || 'Z').toUpperCase());
+			// Very old (pre-ES5) web browsers may be incapable of parsing ISO 8601
+			// dates. In such a case, gracefully continue without replacing the date
+			// format.
+			if (!parsedTime.getTime()) return full;
+
+			var formattedTime;
+			// Try using Intl API if it exists
+			if (window.Intl && window.Intl.DateTimeFormat) {
+				formattedTime = new Intl.DateTimeFormat(undefined, {month: 'long', day: 'numeric', hour: 'numeric', minute: 'numeric'}).format(parsedTime);
+			} else {
+				// toLocaleString even exists in ECMAScript 1, so no need to check
+				// if it exists.
+				formattedTime = parsedTime.toLocaleString();
+			}
+			return '<time>' + Tools.escapeHTML(formattedTime) + '</time>';
 		};
 		return function (input) {
-			return html.sanitizeWithPolicy(getString(input), tagPolicy);
+			// <time> parsing requires ISO 8601 time. While more time formats are
+			// supported by most JavaScript implementations, it isn't required, and
+			// how to exactly enforce ignoring user agent timezone setting is not obvious.
+			// As dates come from the server which isn't aware of client timezone, a
+			// particular timezone is required.
+			//
+			// This regular expression is split into three groups.
+			//
+			// Group 1 - date
+			// Group 2 - time (seconds and milliseconds are optional)
+			// Group 3 - optional timezone
+			//
+			// Group 1 and group 2 are split to allow using space as a separator
+			// instead of T. Stricly speaking ECMAScript 5 specification only
+			// allows T, however it's more practical to also allow spaces.
+			return html.sanitizeWithPolicy(getString(input), tagPolicy)
+				.replace(/<time>\s*([+-]?\d{4,}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d{3})?)?)(Z|[+-]\d{2}:\d{2})?\s*<\/time>/ig, localizeTime);
 		};
 	})(),
 
@@ -1007,10 +1089,11 @@ var Tools = {
 			if (!window.BattlePokedex) window.BattlePokedex = {};
 			if (!window.BattlePokedex[id]) {
 				template = window.BattlePokedex[id] = {};
-				for (var k in baseSpeciesChart) {
-					if (id.length > k.length && id.substr(0, k.length) === k) {
-						template.baseSpecies = k;
-						template.forme = id.substr(k.length);
+				for (var i = 0; i < baseSpeciesChart.length; i++) {
+					var baseid = baseSpeciesChart[i];
+					if (id.length > baseid.length && id.substr(0, baseid.length) === baseid) {
+						template.baseSpecies = baseid;
+						template.forme = id.substr(baseid.length);
 					}
 				}
 				if (id !== 'yanmega' && id.slice(-4) === 'mega') {
@@ -1039,23 +1122,21 @@ var Tools = {
 				var formeid = '';
 				if (template.baseSpecies !== name) {
 					formeid = '-' + toId(template.forme);
-					if (formeid === '-megax') formeid = '-mega-x';
-					if (formeid === '-megay') formeid = '-mega-y';
 				}
 				template.formeid = formeid;
 			}
 			if (!template.spriteid) template.spriteid = toId(template.baseSpecies) + template.formeid;
 			if (!template.effectType) template.effectType = 'Template';
 			if (!template.gen) {
-				if (template.forme && template.forme in {'Mega':1, 'Mega-X':1, 'Mega-Y':1}) {
+				if (template.forme && template.formeid in {'-mega':1, '-megax':1, '-megay':1}) {
 					template.gen = 6;
 					template.isMega = true;
 					template.battleOnly = true;
-				} else if (template.forme === 'Primal') {
+				} else if (template.formeid === '-primal') {
 					template.gen = 6;
 					template.isPrimal = true;
 					template.battleOnly = true;
-				} else if (template.forme === 'Alola') {
+				} else if (template.formeid === '-alola') {
 					template.gen = 7;
 				} else if (template.num >= 722) {
 					template.gen = 7;
@@ -1129,12 +1210,13 @@ var Tools = {
 			w: 96,
 			h: 96,
 			url: Tools.resourcePrefix + 'sprites/',
+			pixelated: true,
 			isBackSprite: false,
 			cryurl: '',
 			shiny: pokemon.shiny
 		};
 		var name = pokemon.spriteid;
-		var dir, isBack, facing;
+		var dir, facing;
 		if (siden) {
 			dir = '';
 			facing = 'front';
@@ -1145,30 +1227,39 @@ var Tools = {
 		}
 
 		// Decide what gen sprites to use.
-		var gen = {1:'rby', 2:'gsc', 3:'rse', 4:'dpp', 5:'bw', 6:'xy', 7:'xy'}[Math.max(options.gen, pokemon.gen)];
-		if (Tools.prefs('nopastgens')) gen = 'xy';
-		if (Tools.prefs('bwgfx') && gen === 'xy') gen = 'bw';
-
-		var gen6animationData = null;
-		if (window.BattlePokemonSprites) {
-			gen6animationData = BattlePokemonSprites[pokemon.speciesid];
+		var genNum = Math.max(options.gen, pokemon.gen);
+		if (Tools.prefs('nopastgens')) genNum = 6;
+		if (Tools.prefs('bwgfx') && genNum >= 6) genNum = 5;
+		if (genNum < 5) {
+			if (!spriteData.isBackSprite) {
+				spriteData.w *= 2;
+				spriteData.h *= 2;
+				spriteData.y = -16;
+			} else {
+				spriteData.w *= 2 / 1.5;
+				spriteData.h *= 2 / 1.5;
+				spriteData.y = -11;
+			}
+			if (genNum <= 2) spriteData.y += 2;
 		}
-		var animationData = gen6animationData;
+		var gen = {1:'rby', 2:'gsc', 3:'rse', 4:'dpp', 5:'bw', 6:'xy', 7:'xy'}[genNum];
+
+		var animationData = null;
+		if (window.BattlePokemonSprites) {
+			animationData = BattlePokemonSprites[pokemon.speciesid];
+		}
 		if (gen === 'bw' && window.BattlePokemonSpritesBW) {
 			animationData = BattlePokemonSpritesBW[pokemon.speciesid];
 		}
-		if (!gen6animationData) gen6animationData = {};
 		if (!animationData) animationData = {};
 
-		if (typeof animationData.num !== 'undefined') {
-			var num = '' + animationData.num;
-			if (num.length < 3) num = '0' + num;
-			if (num.length < 3) num = '0' + num;
-			spriteData.cryurl = 'audio/cries/' + num;
-			if (pokemon.isMega || pokemon.forme && (pokemon.forme === 'Sky' || pokemon.forme === 'Therian' || pokemon.forme === 'Black' || pokemon.forme === 'White' || pokemon.forme === 'Super')) {
-				spriteData.cryurl += pokemon.formeid;
+		if (animationData.num > 0) {
+			spriteData.cryurl = 'audio/cries/' + toId(pokemon.baseSpecies);
+			var formeid = pokemon.formeid;
+			if (pokemon.isMega || formeid && (formeid === '-sky' || formeid === '-therian' || formeid === '-primal' || formeid === '-eternal' || pokemon.baseSpecies === 'Kyurem' || formeid === '-super' || formeid === '-unbound' || formeid === '-midnight' || formeid === '-school' || pokemon.baseSpecies === 'Oricorio' || pokemon.baseSpecies === 'Zygarde')) {
+				spriteData.cryurl += formeid;
 			}
-			spriteData.cryurl += '.wav';
+			spriteData.cryurl += (window.nodewebkit ? '.ogg' : '.mp3');
 		}
 
 		if (pokemon.shiny && options.gen > 1) dir += '-shiny';
@@ -1180,24 +1271,25 @@ var Tools = {
 			return spriteData;
 		}
 
-		if (animationData[facing]) {
-			var spriteType = '';
-			if (animationData[facing]['anif'] && pokemon.gender === 'F') {
-				name += '-f';
-				spriteType += 'f';
-			}
-			if (!Tools.prefs('noanim') && gen in {'bw': 1, 'xy': 1}) {
-				spriteType = 'ani' + spriteType;
-				dir = gen + 'ani' + dir;
+		// Gender differences don't exist prior to Gen 4
+		if (genNum >= 4) {
+			if (animationData[facing]) {
+				if (animationData[facing + 'f'] && pokemon.gender === 'F') {
+					name += '-f';
+					facing += 'f';
+				}
+				if (!Tools.prefs('noanim') && genNum >= 5) {
+					dir = gen + 'ani' + dir;
 
-				spriteData.w = animationData[facing][spriteType].w;
-				spriteData.h = animationData[facing][spriteType].h;
-				spriteData.url += dir + '/' + name + '.gif';
-				return spriteData;
+					spriteData.w = animationData[facing].w;
+					spriteData.h = animationData[facing].h;
+					spriteData.url += dir + '/' + name + '.gif';
+					if (genNum >= 6) spriteData.pixelated = false;
+					return spriteData;
+				}
+			} else if (animationData['frontf'] && pokemon.gender === 'F') {
+				name += '-f';
 			}
-		} else if (gen6animationData[facing] && gen6animationData[facing]['anif'] && pokemon.gender === 'F') {
-			name += '-f';
-			spriteType += 'f';
 		}
 
 		// There is no entry or enough data in pokedex-mini.js
@@ -1216,11 +1308,13 @@ var Tools = {
 	getPokemonIcon: function (pokemon, facingLeft) {
 		var num = 0;
 		if (pokemon === 'pokeball') {
-			return 'background:transparent url(' + Tools.resourcePrefix + 'sprites/xyicons-pokeball-sheet.png) no-repeat scroll -0px 4px';
+			return 'background:transparent url(' + Tools.resourcePrefix + 'sprites/smicons-pokeball-sheet.png) no-repeat scroll -0px 4px';
 		} else if (pokemon === 'pokeball-statused') {
-			return 'background:transparent url(' + Tools.resourcePrefix + 'sprites/xyicons-pokeball-sheet.png) no-repeat scroll -40px 4px';
+			return 'background:transparent url(' + Tools.resourcePrefix + 'sprites/smicons-pokeball-sheet.png) no-repeat scroll -40px 4px';
+		} else if (pokemon === 'pokeball-fainted') {
+			return 'background:transparent url(' + Tools.resourcePrefix + 'sprites/smicons-pokeball-sheet.png) no-repeat scroll -80px 4px;opacity:.4;filter:contrast(0)';
 		} else if (pokemon === 'pokeball-none') {
-			return 'background:transparent url(' + Tools.resourcePrefix + 'sprites/xyicons-pokeball-sheet.png) no-repeat scroll -80px 4px';
+			return 'background:transparent url(' + Tools.resourcePrefix + 'sprites/smicons-pokeball-sheet.png) no-repeat scroll -80px 4px';
 		}
 		var id = toId(pokemon);
 		if (pokemon && pokemon.species) id = toId(pokemon.species);
@@ -1426,7 +1520,23 @@ var Tools = {
 			naviathan: 1140 + 19,
 			crucibelle: 1140 + 20,
 			crucibellemega: 1140 + 21,
-			kerfluffle: 1140 + 22
+			kerfluffle: 1140 + 22,
+
+			syclar: 1164 + 0,
+			embirch: 1164 + 1,
+			flarelm: 1164 + 2,
+			breezi: 1164 + 3,
+			scratchet: 1164 + 4,
+			necturine: 1164 + 5,
+			cupra: 1164 + 6,
+			argalis: 1164 + 7,
+			brattler: 1164 + 8,
+			cawdet: 1164 + 9,
+			volkritter: 1164 + 10,
+			snugglow: 1164 + 11,
+			floatoy: 1164 + 12,
+			caimanoe: 1164 + 13,
+			pluffle: 1164 + 14
 		};
 
 		if (altNums[id]) {
@@ -1530,7 +1640,7 @@ var Tools = {
 
 		var top = Math.floor(num / 12) * 30;
 		var left = (num % 12) * 40;
-		var fainted = (pokemon && pokemon.fainted ? ';opacity:.4' : '');
+		var fainted = (pokemon && pokemon.fainted ? ';opacity:.7;filter:contrast(0)' : '');
 		return 'background:transparent url(' + Tools.resourcePrefix + 'sprites/smicons-sheet.png?a1) no-repeat scroll -' + left + 'px -' + top + 'px' + fainted;
 	},
 
@@ -1563,9 +1673,9 @@ var Tools = {
 		// }
 		if (Tools.prefs('nopastgens')) gen = 6;
 		var spriteDir = Tools.resourcePrefix + 'sprites/xydex';
-		if (template.gen >= 7) spriteDir = Tools.resourcePrefix + 'sprites/bw';
-		if ((!gen || gen === 6) && !template.isNonstandard && !Tools.prefs('bwgfx')) {
+		if ((!gen || gen >= 6) && !template.isNonstandard && !Tools.prefs('bwgfx')) {
 			var offset = '-2px -3px';
+			if (template.gen >= 7) offset = '-6px -7px';
 			if (id.substr(0, 6) === 'arceus') offset = '-2px 7px';
 			if (id === 'garchomp') offset = '-2px 2px';
 			if (id === 'garchompmega') offset = '-2px 0px';

@@ -3,7 +3,7 @@ Config.origindomain = 'play.pokemonshowdown.com';
 // address bar is `Config.origindomain`.
 Config.defaultserver = {
 	id: 'showdown',
-	host: 'sim.psim.us',
+	host: 'sim2.psim.us',
 	port: 443,
 	httpport: 8000,
 	altport: 80,
@@ -215,7 +215,7 @@ Storage.prefs = function (prop, value, save) {
 	// set preference
 	if (value === null) {
 		delete this.prefs.data[prop];
-	} else if (this.prefs.data[prop] === value) {
+	} else if (this.prefs.data[prop] === value && typeof value !== 'object') {
 		return false; // no need to save
 	} else {
 		this.prefs.data[prop] = value;
@@ -542,9 +542,11 @@ Storage.unpackAllTeams = function (buffer) {
 	if (buffer.charAt(0) === '[' && $.trim(buffer).indexOf('\n') < 0) {
 		// old format
 		return JSON.parse(buffer).map(function (oldTeam) {
+			var format = oldTeam.format || 'gen7';
+			if (format && format.slice(0, 3) !== 'gen') format = 'gen6' + format;
 			return {
 				name: oldTeam.name || '',
-				format: oldTeam.format || '',
+				format: format,
 				team: Storage.packTeam(oldTeam.team),
 				folder: '',
 				iconCache: ''
@@ -559,9 +561,11 @@ Storage.unpackAllTeams = function (buffer) {
 		if (bracketIndex > pipeIndex) bracketIndex = -1;
 		var slashIndex = line.lastIndexOf('/', pipeIndex);
 		if (slashIndex < 0) slashIndex = bracketIndex; // line.slice(slashIndex + 1, pipeIndex) will be ''
+		var format = bracketIndex > 0 ? line.slice(0, bracketIndex) : 'gen7';
+		if (format && format.slice(0, 3) !== 'gen') format = 'gen6' + format;
 		return {
 			name: line.slice(slashIndex + 1, pipeIndex),
-			format: bracketIndex > 0 ? line.slice(0, bracketIndex) : '',
+			format: format,
 			team: line.slice(pipeIndex + 1),
 			folder: line.slice(bracketIndex + 1, slashIndex > 0 ? slashIndex : bracketIndex + 1),
 			iconCache: ''
@@ -983,10 +987,11 @@ Storage.importTeam = function (text, teams) {
 		} else if (line.substr(0, 3) === '===' && teams) {
 			team = [];
 			line = $.trim(line.substr(3, line.length - 6));
-			var format = '';
+			var format = 'gen7';
 			var bracketIndex = line.indexOf(']');
 			if (bracketIndex >= 0) {
 				format = line.substr(1, bracketIndex - 1);
+				if (format && format.slice(0, 3) !== 'gen') format = 'gen6' + format;
 				line = $.trim(line.substr(bracketIndex + 1));
 			}
 			if (teams.length) {
@@ -1046,9 +1051,6 @@ Storage.importTeam = function (text, teams) {
 		} else if (line.substr(0, 11) === 'Happiness: ') {
 			line = line.substr(11);
 			curSet.happiness = +line;
-		} else if (line.substr(0, 9) === 'Ability: ') {
-			line = line.substr(9);
-			curSet.ability = line;
 		} else if (line.substr(0, 5) === 'EVs: ') {
 			line = line.substr(5);
 			var evLines = line.split('/');
@@ -1371,6 +1373,7 @@ Storage.nwLoadTeamFile = function (filename, localApp) {
 		format = line.slice(1, bracketIndex);
 		line = $.trim(line.slice(bracketIndex + 1));
 	}
+	if (format && format.slice(0, 3) !== 'gen') format = 'gen6' + format;
 	fs.readFile(this.dir + 'Teams/' + filename, function (err, data) {
 		if (!err) {
 			self.teams.push({

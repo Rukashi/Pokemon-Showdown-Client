@@ -209,7 +209,7 @@
 		 *     triggered if the login server did not return a response
 		 */
 		finishRename: function (name, assertion) {
-			if (assertion.slice(0, 14) === '<!DOCTYPE html') {
+			if (assertion.slice(0, 14).toLowerCase() === '<!doctype html') {
 				// some sort of MitM proxy; ignore it
 				var endIndex = assertion.indexOf('>');
 				if (endIndex > 0) assertion = assertion.slice(endIndex + 1);
@@ -222,12 +222,15 @@
 					return;
 				}
 				app.addPopupMessage("Something is interfering with our connection to the login server.");
+				assertion = assertion.replace(/[\r\n]+/g, ' ');
 				// send to server anyway in case server knows how to deal with it
 				app.send('/trn ' + name + ',0,' + assertion);
 				return;
 			}
 			if (assertion === ';') {
 				this.trigger('login:authrequired', name);
+			} else if (assertion === ';;@gmail') {
+				this.trigger('login:authrequired', name, '@gmail');
 			} else if (assertion.substr(0, 2) === ';;') {
 				this.trigger('login:invalidname', name, assertion.substr(2));
 			} else if (assertion.indexOf('\n') >= 0 || !assertion) {
@@ -272,7 +275,7 @@
 				app.send('/trn ' + name);
 			}
 		},
-		passwordRename: function (name, password) {
+		passwordRename: function (name, password, special) {
 			var self = this;
 			$.post(this.getActionPHP(), {
 				act: 'login',
@@ -286,9 +289,15 @@
 					self.finishRename(name, data.assertion);
 				} else {
 					// wrong password
+					if (special === '@gmail') {
+						try {
+							gapi.auth2.getAuthInstance().signOut(); // eslint-disable-line no-undef
+						} catch (e) {}
+					}
 					app.addPopup(LoginPasswordPopup, {
 						username: name,
-						error: 'Wrong password.'
+						error: 'Wrong password.',
+						special: special
 					});
 				}
 			}), 'text');
@@ -374,24 +383,35 @@
 			this.topbar = new Topbar({el: $('#header')});
 			if (this.down) {
 				this.isDisconnected = true;
-			} else if (document.location.hostname === 'play.pokemonshowdown.com' || Config.testclient) {
-				this.addRoom('rooms', null, true);
+			} else {
+				if (document.location.hostname === 'play.pokemonshowdown.com' || Config.testclient) {
+					this.addRoom('rooms', null, true);
+				} else {
+					this.addRoom('lobby', null, true);
+				}
 				Storage.whenPrefsLoaded(function () {
+					if (!Config.server.registered) return app.send('/autojoin');
 					var autojoin = (Tools.prefs('autojoin') || '');
 					var autojoinIds = [];
+					if (typeof autojoin === 'string') {
+						// Use the existing autojoin string for showdown, and an empty string for other servers.
+						if (Config.server.id !== 'showdown') autojoin = '';
+					} else {
+						// If there is not autojoin data for this server, use a empty string.
+						autojoin = autojoin[Config.server.id] || '';
+					}
 					if (autojoin) {
 						var autojoins = autojoin.split(',');
 						for (var i = 0; i < autojoins.length; i++) {
 							var roomid = toRoomid(autojoins[i]);
 							app.addRoom(roomid, null, true, autojoins[i]);
-							if (roomid !== 'staff' && roomid !== 'upperstaff') autojoinIds.push(roomid);
+							if (roomid === 'staff' || roomid === 'upperstaff') continue;
+							if (Config.server.id !== 'showdown' && roomid === 'lobby') continue;
+							autojoinIds.push(roomid);
 						}
 					}
 					app.send('/autojoin ' + autojoinIds.join(','));
 				});
-			} else {
-				this.addRoom('lobby', null, true);
-				this.send('/autojoin');
 			}
 
 			var self = this;
@@ -419,6 +439,11 @@
 					} else {
 						debugStyle.innerHTML = onCSS;
 					}
+				}
+
+				if (Tools.prefs('onepanel')) {
+					self.singlePanelMode = true;
+					self.updateLayout();
 				}
 
 				if (Tools.prefs('bwgfx') || Tools.prefs('noanim')) {
@@ -465,8 +490,8 @@
 				self.addPopup(LoginPopup, {name: name, reason: reason});
 			});
 
-			this.user.on('login:authrequired', function (name) {
-				self.addPopup(LoginPasswordPopup, {username: name});
+			this.user.on('login:authrequired', function (name, special) {
+				self.addPopup(LoginPasswordPopup, {username: name, special: special});
 			});
 
 			this.on('response:savereplay', this.uploadReplay, this);
@@ -634,9 +659,8 @@
 		connect: function () {
 			if (this.down) return;
 
-			var bannedHosts = ['cool.jit.su'];
-			if (Config.server.banned || bannedHosts.indexOf(Config.server.host) >= 0) {
-				this.addPopupMessage("This server has been deleted for breaking US laws or impersonating PS global staff.");
+			if (Config.server.banned || (Config.bannedHosts && Config.bannedHosts.indexOf(Config.server.host) >= 0)) {
+				this.addPopupMessage("This server has been deleted for breaking US laws, impersonating PS global staff, or other major rulebreaking.");
 				return;
 			}
 
@@ -684,11 +708,7 @@
 				if (window.console && console.log) {
 					console.log('<< ' + msg.data);
 				}
-				if (msg.data.charAt(0) !== '{') {
-					self.receive(msg.data);
-					return;
-				}
-				alert("This server is using an outdated version of Pokémon Showdown and needs to be updated.");
+				self.receive(msg.data);
 			};
 			var reconstructSocket = function (socket) {
 				var s = constructSocket();
@@ -762,7 +782,7 @@
 		receive: function (data) {
 			var roomid = '';
 			var autojoined = false;
-			if (data.substr(0, 1) === '>') {
+			if (data.charAt(0) === '>') {
 				var nlIndex = data.indexOf('\n');
 				if (nlIndex < 0) return;
 				roomid = toRoomid(data.substr(1, nlIndex - 1));
@@ -863,6 +883,16 @@
 			}
 
 			switch (parts[0]) {
+			case 'customgroups':
+				var nlIndex = data.indexOf('\n');
+				if (nlIndex > 0) {
+					this.receive(data.substr(nlIndex + 1));
+				}
+
+				var tarRow = data.slice(14, nlIndex);
+				this.parseGroups(tarRow);
+				break;
+
 			case 'challstr':
 				if (parts[2]) {
 					this.user.receiveChallstr(parts[1] + '|' + parts[2]);
@@ -1005,6 +1035,35 @@
 				break;
 			}
 		},
+		parseGroups: function (groupsList) {
+			var data = null;
+			try {
+				data = JSON.parse(groupsList);
+			} catch (e) {}
+			if (!data) return; // broken JSON - keep default ranks
+
+			var groups = {};
+			// process the data and sort into the three auth tiers, 0, 1, and 2
+			for (var i = 0; i < data.length; i++) {
+				var entry = data[i];
+				if (!entry) continue;
+
+				var symbol = entry.symbol || ' ';
+				var groupName = entry.name;
+				var groupType = entry.type || 'user';
+
+				if (groupType === 'normal' && !Config.defaultOrder) Config.defaultOrder = i + 0.5; // this is where any undeclared groups will be positioned in userlist
+				if (!groupName) Config.defaultGroup = symbol;
+
+				groups[symbol] = {
+					name: groupName ? Tools.escapeHTML(groupName + ' (' + symbol + ')') : null,
+					type: groupType,
+					order: i + 1,
+				};
+			}
+
+			Config.groups = groups; // if nothing from above crashes (malicious json), then the client will use the new custom groups
+		},
 		parseFormats: function (formatsList) {
 			var isSection = false;
 			var section = '';
@@ -1035,6 +1094,7 @@
 					var challengeShow = true;
 					var tournamentShow = true;
 					var team = null;
+					var teambuilderLevel = null;
 					var lastCommaIndex = name.lastIndexOf(',');
 					var code = lastCommaIndex >= 0 ? parseInt(name.substr(lastCommaIndex + 1), 16) : NaN;
 					if (!isNaN(code)) {
@@ -1043,6 +1103,7 @@
 						if (!(code & 2)) searchShow = false;
 						if (!(code & 4)) challengeShow = false;
 						if (!(code & 8)) tournamentShow = false;
+						if (code & 16) teambuilderLevel = 50;
 					} else {
 						// Backwards compatibility: late 0.9.0 -> 0.10.0
 						if (name.substr(name.length - 2) === ',#') { // preset teams
@@ -1060,17 +1121,25 @@
 					var id = toId(name);
 					var isTeambuilderFormat = !team && name.slice(-11) !== 'Custom Game';
 					var teambuilderFormat = '';
+					var teambuilderFormatName = '';
 					if (isTeambuilderFormat) {
-						var parenPos = name.indexOf('(');
-						if (parenPos > 0 && name.charAt(name.length - 1) === ')') {
+						teambuilderFormatName = name;
+						if (id.slice(0, 3) !== 'gen') {
+							teambuilderFormatName = '[Gen 6] ' + name;
+						}
+						var parenPos = teambuilderFormatName.indexOf('(');
+						if (parenPos > 0 && name.slice(-1) === ')') {
 							// variation of existing tier
-							teambuilderFormat = toId(name.substr(0, parenPos));
+							teambuilderFormatName = $.trim(teambuilderFormatName.slice(0, parenPos));
+						}
+						if (teambuilderFormatName !== name) {
+							teambuilderFormat = toId(teambuilderFormatName);
 							if (BattleFormats[teambuilderFormat]) {
 								BattleFormats[teambuilderFormat].isTeambuilderFormat = true;
 							} else {
 								BattleFormats[teambuilderFormat] = {
 									id: teambuilderFormat,
-									name: $.trim(name.substr(0, parenPos)),
+									name: teambuilderFormatName,
 									team: team,
 									section: section,
 									column: column,
@@ -1085,6 +1154,8 @@
 					if (BattleFormats[id] && BattleFormats[id].isTeambuilderFormat) {
 						isTeambuilderFormat = true;
 					}
+					// make sure formats aren't out-of-order
+					if (BattleFormats[id]) delete BattleFormats[id];
 					BattleFormats[id] = {
 						id: id,
 						name: name,
@@ -1095,6 +1166,7 @@
 						challengeShow: challengeShow,
 						tournamentShow: tournamentShow,
 						rated: searchShow && id.substr(0, 7) !== 'unrated',
+						teambuilderLevel: teambuilderLevel,
 						teambuilderFormat: teambuilderFormat,
 						isTeambuilderFormat: isTeambuilderFormat,
 						effectType: 'Format'
@@ -1111,10 +1183,8 @@
 					// The base format is not available.
 					if (teambuilderFormat.battleFormat) {
 						multivariantFormats[teambuilderFormat.id] = 1;
-						teambuilderFormat.hasBattleFormat = false;
 						teambuilderFormat.battleFormat = '';
 					} else {
-						teambuilderFormat.hasBattleFormat = true;
 						teambuilderFormat.battleFormat = id;
 					}
 				}
@@ -1163,7 +1233,7 @@
 				if (this.host === 'play.pokemonshowdown.com' || this.host === 'psim.us' || this.host === location.host) {
 					if (!e.cmdKey && !e.metaKey && !e.ctrlKey) {
 						var target = this.pathname.substr(1);
-						var shortLinks = /^(appeals?|rooms?suggestions?|suggestions?|adminrequests?|bugs?|bugreports?|rules?|faq)$/;
+						var shortLinks = /^(appeals?|rooms?suggestions?|suggestions?|adminrequests?|bugs?|bugreports?|rules?|faq|credits?|news|privacy|contact|dex)$/;
 						if (target.indexOf('/') < 0 && target.indexOf('.') < 0 && !shortLinks.test(target)) {
 							window.app.tryJoinRoom(target);
 							e.preventDefault();
@@ -1313,8 +1383,13 @@
 				if (this.curSideRoom === oldRoom) this.curSideRoom = room;
 				if (this.sideRoom === oldRoom) this.sideRoom = room;
 			}
-			if (type === BattleRoom) this.roomList.push(room);
-			if (type === ChatRoom || type === BattlesRoom) this.sideRoomList.push(room);
+			if (['', 'teambuilder', 'ladder', 'rooms'].indexOf(room.id) < 0) {
+				if (room.isSideRoom) {
+					this.sideRoomList.push(room);
+				} else {
+					this.roomList.push(room);
+				}
+			}
 			return room;
 		},
 		focusRoom: function (id) {
@@ -1406,8 +1481,12 @@
 			// If we don't have any right rooms at all, just show the left
 			// room in full. Home is a left room, so we'll always have a
 			// left room.
-			if (!this.sideRoom) {
+			if (!this.sideRoom || this.singlePanelMode) {
 				this.curRoom.show('full');
+				if (this.curSideRoom) {
+					this.curSideRoom.hide();
+					this.curSideRoom = null;
+				}
 				if (this.curRoom.id === '') {
 					if ($(window).width() < this.curRoom.bestWidth) {
 						this.curRoom.$el.addClass('tiny-layout');
@@ -1636,7 +1715,7 @@
 			document.title = room.title ? room.title + " - Showdown!" : "Showdown!";
 		},
 		updateAutojoin: function () {
-			if (Config.server.id !== 'showdown') return;
+			if (!Config.server.registered) return;
 			var autojoins = [];
 			var autojoinCount = 0;
 			var rooms = this.roomList.concat(this.sideRoomList);
@@ -1644,11 +1723,38 @@
 				var room = rooms[i];
 				if (room.type !== 'chat') continue;
 				autojoins.push(room.id.indexOf('-') >= 0 ? room.id : (room.title || room.id));
-				if (room.id === 'staff' || room.id === 'upperstaff') continue;
+				if (room.id === 'staff' || room.id === 'upperstaff' || (Config.server.id !== 'showdown' && room.id === 'lobby')) continue;
 				autojoinCount++;
 				if (autojoinCount >= 10) break;
 			}
-			Tools.prefs('autojoin', autojoins.join(','));
+			var curAutojoin = (Tools.prefs('autojoin') || '');
+			if (typeof curAutojoin !== 'string') {
+				if (curAutojoin[Config.server.id] === autojoins.join(',')) return;
+				if (!autojoins.length) {
+					delete curAutojoin[Config.server.id];
+					// If the only key left is 'showdown', revert to the string method for storing autojoin.
+					var hasSideServer = false;
+					for (var key in curAutojoin) {
+						if (key === 'showdown') continue;
+						hasSideServer = true;
+						break;
+					}
+					if (!hasSideServer) curAutojoin = curAutojoin.showdown || '';
+				} else {
+					curAutojoin[Config.server.id] = autojoins.join(',');
+				}
+			} else {
+				if (Config.server.id !== 'showdown') {
+					// Switch to the autojoin object to handle multiple servers
+					curAutojoin = {showdown: curAutojoin};
+					if (!autojoins.length) return;
+					curAutojoin[Config.server.id] = autojoins.join(',');
+				} else {
+					if (curAutojoin === autojoins.join(',')) return;
+					curAutojoin = autojoins.join(',');
+				}
+			}
+			Tools.prefs('autojoin', curAutojoin);
 		},
 
 		/*********************************************************
@@ -1683,6 +1789,7 @@
 			if (!type) type = Popup;
 
 			var popup = new type(data);
+			popup.lastFocusedEl = document.activeElement;
 
 			var $overlay;
 			if (popup.type === 'normal') {
@@ -1717,6 +1824,7 @@
 		closePopup: function (id) {
 			if (this.popups.length) {
 				var popup = this.popups.pop();
+				if (popup.lastFocusedEl && popup.lastFocusedEl.focus) popup.lastFocusedEl.focus();
 				popup.remove();
 				if (this.reconnectPending) this.addPopup(ReconnectPopup, {message: this.reconnectPending});
 				return true;
@@ -1748,6 +1856,7 @@
 
 			if (!(options && options.nojoin)) this.join();
 			if (options && options.title) this.title = options.title;
+			this.el.id = 'room-' + this.id;
 		},
 		dispatchClickButton: function (e) {
 			var target = e.currentTarget;
@@ -1849,27 +1958,31 @@
 			} else if (window.Notification) {
 				// old one doesn't need to be closed; sending the tag should
 				// automatically replace the old notification
-				var notification = this.notifications[tag] = new Notification(title, {
-					lang: 'en',
-					body: body,
-					tag: this.id + ':' + tag
-				});
-				var self = this;
-				notification.onclose = function () {
-					self.dismissNotification(tag);
-				};
-				notification.onclick = function () {
-					window.focus();
-					self.clickNotification(tag);
-				};
-				if (Tools.prefs('temporarynotifications')) {
-					if (notification.cancel) {
-						setTimeout(function () {notification.cancel();}, 5000);
-					} else if (notification.close) {
-						setTimeout(function () {notification.close();}, 5000);
+				try {
+					var notification = this.notifications[tag] = new Notification(title, {
+						lang: 'en',
+						body: body,
+						tag: this.id + ':' + tag
+					});
+					var self = this;
+					notification.onclose = function () {
+						self.dismissNotification(tag);
+					};
+					notification.onclick = function () {
+						window.focus();
+						self.clickNotification(tag);
+					};
+					if (Tools.prefs('temporarynotifications')) {
+						if (notification.cancel) {
+							setTimeout(function () {notification.cancel();}, 5000);
+						} else if (notification.close) {
+							setTimeout(function () {notification.close();}, 5000);
+						}
 					}
+					if (once) notification.psAutoclose = true;
+				} catch (e) {
+					// Chrome mobile will leave Notification in existence but throw if you try to use it
 				}
-				if (once) notification.psAutoclose = true;
 				needsTabbarUpdate = true;
 			} else if (window.macgap) {
 				macgap.growl.notify({
@@ -2151,6 +2264,73 @@
 		}
 	});
 
+	Config.groups = Config.groups || {
+		'~': {
+			name: "Administrator (~)",
+			type: 'leadership',
+			order: 10001,
+		},
+		'#': {
+			name: "Room Owner (#)",
+			type: 'leadership',
+			order: 10002,
+		},
+		'&': {
+			name: "Leader (&amp;)",
+			type: 'leadership',
+			order: 10003,
+		},
+		'@': {
+			name: "Moderator (@)",
+			type: 'staff',
+			order: 10004,
+		},
+		'%': {
+			name: "Driver (%)",
+			type: 'staff',
+			order: 10005,
+		},
+		'*': {
+			name: "Bot (*)",
+			type: 'normal',
+			order: 10006,
+		},
+		'\u2606': {
+			name: "Player (\u2606)",
+			type: 'normal',
+			order: 10007,
+		},
+		'\u2605': {
+			name: "Player (\u2605)",
+			type: 'normal',
+			order: 10008,
+		},
+		'+': {
+			name: "Voice (+)",
+			type: 'normal',
+			order: 10009,
+		},
+		' ': {
+			type: 'normal',
+			order: 10010,
+		},
+		'!': {
+			name: "<span style='color:#777777'>Muted (!)</span>",
+			type: 'punishment',
+			order: 10011,
+		},
+		'✖': {
+			name: "<span style='color:#777777'>Namelocked (✖)</span>",
+			type: 'punishment',
+			order: 10012,
+		},
+		'\u203d': {
+			name: "<span style='color:#777777'>Locked (\u203d)</span>",
+			type: 'punishment',
+			order: 10013,
+		}
+	};
+
 	var UserPopup = this.UserPopup = Popup.extend({
 		initialize: function (data) {
 			data.userid = toId(data.name);
@@ -2176,21 +2356,8 @@
 			var userid = data.userid;
 			var name = data.name;
 			var avatar = data.avatar || '';
-			var groupDetails = {
-				'#': "Room Owner (#)",
-				'~': "Administrator (~)",
-				'&': "Leader (&amp;)",
-				'@': "Moderator (@)",
-				'%': "Driver (%)",
-				'*': "Bot (*)",
-				'\u2605': "Player (\u2605)",
-				'+': "Voice (+)",
-				'‽': "<span style='color:#777777'>Locked (‽)</span>",
-				'✖': "<span style='color:#777777'>Namelocked (✖)</span>",
-				'!': "<span style='color:#777777'>Muted (!)</span>"
-			};
-			var group = (groupDetails[name.substr(0, 1)] || '');
-			var globalgroup = (groupDetails[(data.group || '').charAt(0)] || '');
+			var group = ((Config.groups[name.charAt(0)] || {}).name || '');
+			var globalgroup = ((Config.groups[(data.group || Config.defaultGroup || ' ')] || {}).name || '');
 			if (globalgroup) {
 				if (!group || group === globalgroup) {
 					group = "Global " + globalgroup;
@@ -2389,14 +2556,13 @@
 			var buf = '';
 			buf = '<p>Your replay has been uploaded! It\'s available at:</p>';
 			buf += '<p><a href="http://replay.pokemonshowdown.com/' + data.id + '" target="_blank">http://replay.pokemonshowdown.com/' + data.id + '</a></p>';
-			buf += '<p><button type="submit" class="autofocus"><strong>Open</strong></button> <button name="close">Cancel</button></p>';
+			buf += '<p><button class="autofocus" name="close">Close</button></p>';
 			this.$el.html(buf).css('max-width', 620);
 		},
 		clickClose: function () {
 			this.close();
 		},
 		submit: function (i) {
-			app.openInNewWindow('http://replay.pokemonshowdown.com/' + this.id);
 			this.close();
 		}
 	});

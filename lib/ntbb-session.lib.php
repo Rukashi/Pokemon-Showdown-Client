@@ -49,9 +49,9 @@ class NTBBSession {
 		$res = $psdb->query(
 			"SELECT sid, timeout, `{$psdb->prefix}users`.* " .
 			"FROM `{$psdb->prefix}sessions`, `{$psdb->prefix}users` " .
-			"WHERE `session` = $session " .
+			"WHERE `session` = ? " .
 				"AND `{$psdb->prefix}sessions`.`userid` = `{$psdb->prefix}users`.`userid` " .
-			"LIMIT 1");
+			"LIMIT 1", [$session]);
 		if (!$res) {
 			// query problem?
 			$this->killCookie();
@@ -67,7 +67,7 @@ class NTBBSession {
 			// session expired
 			// delete all sessions that will expire within 30 minutes
 			$ctime += 60 * 30;
-			$psdb->query("DELETE FROM `{$psdb->prefix}sessions` WHERE `timeout` < $ctime");
+			$psdb->query("DELETE FROM `{$psdb->prefix}sessions` WHERE `timeout` < ?", [$ctime]);
 			$this->killCookie();
 			return;
 		}
@@ -179,22 +179,20 @@ class NTBBSession {
 	}
 
 	private function passwordVerifyInner($userid, $pass, $user) {
-		global $psdb;
+		global $psdb, $psconfig;
 
 		// throttle
 		$ip = $this->getIp();
 		$res = $psdb->query(
-			"SELECT `count`, `time` " .
-			"FROM `{$psdb->prefix}loginthrottle` " .
-			"WHERE `ip` = '".$ip."' " .
-			"LIMIT 1"
+			"SELECT `count`, `time` FROM `{$psdb->prefix}loginthrottle` WHERE `ip` = ? LIMIT 1",
+			[$ip]
 		);
 		$loginthrottle = null;
 		if ($res) $loginthrottle = $psdb->fetch_assoc($res);
 		if ($loginthrottle) {
 			if ($loginthrottle['count'] > 500) {
 				$loginthrottle['count']++;
-				$psdb->query("UPDATE `{$psdb->prefix}loginthrottle` SET count = {$loginthrottle['count']}, lastuserid = '".$userid."', `time` = '".time()."' WHERE ip = '".$ip."'");
+				$psdb->query("UPDATE `{$psdb->prefix}loginthrottle` SET count = ?, lastuserid = ?, `time` = ? WHERE ip = ?", [$loginthrottle['count'], $userid, time(), $ip]);
 				return false;
 			} else if ($loginthrottle['time'] + 24 * 60 * 60 < time()) {
 				$loginthrottle = [
@@ -204,6 +202,18 @@ class NTBBSession {
 			}
 		}
 
+		if (substr(@$user['email'], -1) === '@') {
+			require_once dirname(__FILE__).'/../vendor/autoload.php';
+			$client = new Google_Client(['client_id' => $psconfig['gapi_clientid']]);
+			$payload = $client->verifyIdToken($pass);
+			if (!$payload) return false;
+			if (strpos($payload['aud'], $psconfig['gapi_clientid']) === false) return false;
+			if ($payload['email'] === substr($user['email'], 0, -1)) {
+				return true;
+			}
+			return false;
+		}
+
 		$rehash = false;
 		if ($user['passwordhash']) {
 			// new password hashes
@@ -211,7 +221,7 @@ class NTBBSession {
 				// wrong password
 				if ($loginthrottle) {
 					$loginthrottle['count']++;
-					$psdb->query("UPDATE `{$psdb->prefix}loginthrottle` SET count = {$loginthrottle['count']}, lastuserid = ?, `time` = ? WHERE ip = ?", [$userid, time(), $ip]);
+					$psdb->query("UPDATE `{$psdb->prefix}loginthrottle` SET count = ?, lastuserid = ?, `time` = ? WHERE ip = ?", [$loginthrottle['count'], $userid, time(), $ip]);
 				} else {
 					$psdb->query("INSERT INTO `{$psdb->prefix}loginthrottle` (ip, count, lastuserid, `time`) VALUES (?, 1, ?, ?)", [$ip, $userid, time()]);
 				}
@@ -266,8 +276,8 @@ class NTBBSession {
 		$nsid = $this->mksid();
 		$nsidhash = $this->sidHash($nsid);
 		$res = $psdb->query(
-			"INSERT INTO `{$psdb->prefix}sessions` (`userid`,`sid`,`time`,`timeout`,`ip`) VALUES (?,?,$ctime,$timeout,?)",
-			[$user['userid'], $nsidhash, $this->getIp()]
+			"INSERT INTO `{$psdb->prefix}sessions` (`userid`,`sid`,`time`,`timeout`,`ip`) VALUES (?,?,?,?,?)",
+			[$user['userid'], $nsidhash, $ctime, $timeout, $this->getIp()]
 		);
 		if (!$res) die;
 
@@ -310,7 +320,7 @@ class NTBBSession {
 		if (!$this->session) return $curuser;
 
 		$curuser = $this->getGuest();
-		$psdb->query("DELETE FROM `{$psdb->prefix}sessions` WHERE `session` = '{$this->session}' LIMIT 1");
+		$psdb->query("DELETE FROM `{$psdb->prefix}sessions` WHERE `session` = ? LIMIT 1", [$this->session]);
 		$this->sid = '';
 		$this->session = 0;
 
@@ -447,9 +457,9 @@ class NTBBSession {
 				} else if (intval(@$user['banstate']) <= -10) {
 					$usertype = '4';
 				} else if (@$user['banstate'] >= 100) {
-					return ';;Your account is disabled.';
+					return ';;Your username is no longer available.';
 				} else if (@$user['banstate'] >= 40) {
-					if ($serverhostname === 'sim.psim.us') {
+					if ($serverhostname === 'sim2.psim.us') {
 						$usertype = '40';
 					} else {
 						$usertype = '2';
@@ -486,11 +496,12 @@ class NTBBSession {
 			} else if ($row = $psdb->fetch_assoc($res)) {
 				// Username exists, but the user isn't logged in: require authentication.
 				if ($row['banstate'] >= 100) {
-					return ';;Your account is disabled.';
+					return ';;Your username is no longer available.';
 				}
 				if ($row['password'] && $row['nonce']) {
-					return ';;Your account is disabled.';
+					return ';;Your username is no longer available.';
 				}
+				if (substr($row['email'], -1) === '@') return ';;@gmail';
 				return ';';
 			} else {
 				// Unregistered username.
@@ -512,6 +523,7 @@ class NTBBSession {
 			$challengekeyid = intval($splitChallenge[0]);
 			$challenge = $splitChallenge[1];
 			if (@$splitChallenge[2] && !$challengetoken) $challengetoken = $splitChallenge[2];
+			$_REQUEST['challengetoken'] = $challengetoken;
 		}
 
 		if ($challengekeyid < 1) {
@@ -637,19 +649,23 @@ class NTBBSession {
 			return false;
 		}
 
+		$res = $psdb->query("SELECT `userid` FROM `{$psdb->prefix}users` WHERE `userid` = ? LIMIT 1", [$user['userid']]);
+		if ($row = $psdb->fetch_assoc($res)) {
+			return false;
+		}
+
 		$psdb->query(
 			"INSERT INTO `{$psdb->prefix}users` (`userid`,`username`,`passwordhash`,`email`,`registertime`,`ip`) VALUES (?, ?, ?, ?, ?, ?)",
 			[$user['userid'], $user['username'], $user['passwordhash'], @$user['email'], $ctime, $this->getIp()]
 		);
-		if ($psdb->error())
-		{
+		if ($psdb->error()) {
 			return false;
 		}
 
 		$user['usernum'] = $psdb->insert_id();
-		$user['loggedin'] = true;
 		$this->login($user['username'], $password);
-		return $user;
+		if (!$curuser['loggedin'] || $curuser['userid'] !== $user['userid']) return false;
+		return $curuser;
 	}
 
 	function wordfilter($text) {

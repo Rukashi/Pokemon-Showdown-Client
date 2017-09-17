@@ -14,6 +14,7 @@
 			'dblclick .pm-window h3': 'dblClickPMHeader',
 			'focus textarea': 'onFocusPM',
 			'blur textarea': 'onBlurPM',
+			'click .spoiler': 'clickSpoiler',
 			'click button.formatselect': 'selectFormat',
 			'click button.teamselect': 'selectTeam'
 		},
@@ -105,7 +106,7 @@
 			options.append = options.append || false;
 			options.noMinimize = options.noMinimize || false;
 
-			this.$pmBox[options.append ? 'append' : 'prepend']('<div class="pm-window ' + options.cssClass + '" ' + options.attributes + '><h3><button class="closebutton" tabindex="-1"><i class="fa fa-times-circle"></i></button>' + (!options.noMinimize ? '<button class="minimizebutton" tabindex="-1"><i class="fa fa-minus-circle"></i></button>' : '') + options.title + '</h3><div class="pm-log" style="overflow:visible;height:' + (typeof options.height === 'number' ? options.height + 'px' : options.height) + ';' + (parseInt(options.height, 10) ? 'max-height:none' : (options.maxHeight ? 'max-height:' + (typeof options.maxHeight === 'number' ? options.maxHeight + 'px' : options.maxHeight) : '')) + '">' +
+			this.$pmBox[options.append ? 'append' : 'prepend']('<div class="pm-window ' + options.cssClass + '" ' + options.attributes + '><h3><button class="closebutton" tabindex="-1" aria-label="Close"><i class="fa fa-times-circle"></i></button>' + (!options.noMinimize ? '<button class="minimizebutton" tabindex="-1" aria-label="Minimize"><i class="fa fa-minus-circle"></i></button>' : '') + options.title + '</h3><div class="pm-log" style="overflow:visible;height:' + (typeof options.height === 'number' ? options.height + 'px' : options.height) + ';' + (parseInt(options.height, 10) ? 'max-height:none' : (options.maxHeight ? 'max-height:' + (typeof options.maxHeight === 'number' ? options.maxHeight + 'px' : options.maxHeight) : '')) + '">' +
 				options.html +
 				'</div></div>');
 		},
@@ -152,7 +153,7 @@
 			var $lastMessage = $chat.children().last();
 			var textContent = $lastMessage.html().indexOf('<span class="spoiler">') >= 0 ? '(spoiler)' : $lastMessage.children().last().text();
 			if (textContent && app.curSideRoom && app.curSideRoom.addPM && Tools.prefs('inchatpm')) {
-				app.curSideRoom.addPM(name, textContent, target);
+				app.curSideRoom.addPM(name, message, target);
 			}
 
 			if (!isSelf && textContent) {
@@ -178,10 +179,10 @@
 					group = '<small>' + Tools.escapeHTML(group) + '</small>';
 				}
 				var buf = '<div class="pm-window pm-window-' + userid + '" data-userid="' + userid + '" data-name="' + name + '">';
-				buf += '<h3><button class="closebutton" href="' + app.root + 'teambuilder" tabindex="-1"><i class="fa fa-times-circle"></i></button>';
-				buf += '<button class="minimizebutton" href="' + app.root + 'teambuilder" tabindex="-1"><i class="fa fa-minus-circle"></i></button>';
+				buf += '<h3><button class="closebutton" href="' + app.root + 'teambuilder" tabindex="-1" aria-label="Close"><i class="fa fa-times-circle"></i></button>';
+				buf += '<button class="minimizebutton" href="' + app.root + 'teambuilder" tabindex="-1" aria-label="Minimize"><i class="fa fa-minus-circle"></i></button>';
 				buf += group + Tools.escapeHTML(name.substr(1)) + '</h3>';
-				buf += '<div class="pm-log"><div class="inner"></div></div>';
+				buf += '<div class="pm-log"><div class="inner" role="log"></div></div>';
 				buf += '<div class="pm-log-add"><form class="chatbox nolabel"><textarea class="textbox" type="text" size="70" autocomplete="off" name="message"></textarea></form></div></div>';
 				$pmWindow = $(buf).prependTo(this.$pmBox);
 				$pmWindow.find('textarea').autoResize({
@@ -325,6 +326,8 @@
 					delete app.ignore[userid];
 					$chat.append('<div class="chat">User ' + userid + ' no longer ignored.</div>');
 				}
+			} else if (text.toLowerCase() === '/clear') {
+				$chat.empty();
 			} else {
 				text = ('\n' + text).replace(/\n\n/g, '\n').replace(/\n/g, '\n/pm ' + userid + ', ').substr(1);
 				if (text.length > 80000) {
@@ -341,7 +344,12 @@
 			if (e.keyCode === 13 && !e.shiftKey) { // Enter
 				this.submitPM(e);
 			} else if (e.keyCode === 27) { // Esc
-				this.closePM(e);
+				if (app.curSideRoom && app.curSideRoom.undoTabComplete && app.curSideRoom.undoTabComplete($(e.currentTarget))) {
+					e.preventDefault();
+					e.stopPropagation();
+				} else {
+					this.closePM(e);
+				}
 			} else if (e.keyCode === 73 && cmdKey) { // Ctrl + I key
 				if (ConsoleRoom.toggleFormatChar(e.currentTarget, '_')) {
 					e.preventDefault();
@@ -362,7 +370,8 @@
 				var $pmWindow = $target.closest('.pm-window');
 				var $chat = $pmWindow.find('.pm-log');
 				$chat.scrollTop($chat.scrollTop() + $chat.height() - 60);
-			} else if (e.keyCode === 9 && !e.shiftKey && !e.ctrlKey) { // Tab key
+			} else if (e.keyCode === 9 && !e.ctrlKey) { // Tab key
+				var reverse = !!e.shiftKey; // Shift+Tab reverses direction
 				var handlerRoom = app.curSideRoom;
 				if (!handlerRoom) {
 					for (var roomid in app.rooms) {
@@ -371,7 +380,7 @@
 						break;
 					}
 				}
-				if (handlerRoom && handlerRoom.handleTabComplete && handlerRoom.handleTabComplete($(e.currentTarget))) {
+				if (handlerRoom && handlerRoom.handleTabComplete && handlerRoom.handleTabComplete($(e.currentTarget), reverse)) {
 					e.preventDefault();
 					e.stopPropagation();
 				}
@@ -411,7 +420,7 @@
 		chatHistories: {},
 		clickUsername: function (e) {
 			e.stopPropagation();
-			var name = $(e.currentTarget).data('name');
+			var name = $(e.currentTarget).data('name') || $(e.currentTarget).text();
 			app.addPopup(UserPopup, {name: name, sourceEl: e.currentTarget});
 		},
 		clickPMBackground: function (e) {
@@ -448,6 +457,9 @@
 			} else if (document.selection) {
 				document.selection.empty();
 			}
+		},
+		clickSpoiler: function (e) {
+			$(e.currentTarget).toggleClass('spoiler-shown');
 		},
 
 		// support for buttons that can be sent by the server:
@@ -906,7 +918,7 @@
 				if (selectType === 'teambuilder') {
 					if (!format.isTeambuilderFormat) continue;
 				} else {
-					if (format.effectType !== 'Format') continue;
+					if (format.effectType !== 'Format' || format.battleFormat) continue;
 					if (selectType != 'watch' && !format[selectType + 'Show']) continue;
 				}
 
@@ -977,6 +989,7 @@
 
 			this.team = data.team;
 			this.format = data.format;
+			this.room = data.room;
 
 			var format = BattleFormats[data.format];
 
@@ -1034,8 +1047,9 @@
 			var sourceEl = this.sourceEl;
 			var team = this.team;
 			var format = this.format;
+			var room = this.room;
 			this.close();
-			app.addPopup(TeamPopup, {team: team, format: format, sourceEl: sourceEl, moreTeams: true});
+			app.addPopup(TeamPopup, {team: team, format: format, sourceEl: sourceEl, room: room, moreTeams: true});
 		},
 		teambuilder: function () {
 			var teamFormat = this.teamFormat;
@@ -1054,8 +1068,7 @@
 				app.rooms[''].curTeamIndex = i;
 				app.rooms[''].curTeamFormat = formatid;
 			} else if (this.sourceEl[0].offsetParent.className === 'tournament-box active') {
-				var room = app.dispatchingPopup.options.room;
-				app.rooms[room].tournamentBox.curTeamIndex = i;
+				app.rooms[this.room].tournamentBox.curTeamIndex = i;
 			}
 			this.close();
 		}
@@ -1090,16 +1103,17 @@
 			buf += '<ul><li><p><a href="http://guangcongluo.com/" target="_blank" class="subtle"><strong>Guangcong Luo</strong> [Zarel]</a> <small>&ndash; Development, Design, Sysadmin</small></p></li></ul>';
 			buf += '<h2>Staff</h2>';
 			buf += '<ul><li><p><strong>Chris Monsanto</strong> [chaos] <small>&ndash; Sysadmin</small></p></li>';
-			buf += '<li><p><strong>Hugh Gordon</strong> [V4] <small>&ndash; Research (game mechanics), Development</small></p></li>';
-			buf += '<li><p><a href="http://www.juanmaserrano.com/" target="_blank" class="subtle"><strong>Juanma Serrano</strong> [Joim]</a> <small>&ndash; Development, Sysadmin</small></p></li>';
 			buf += '<li><p><strong>Leonardo Julca</strong> [Slayer95] <small>&ndash; Development</small></p></li>';
 			buf += '<li><p><strong>Mathieu Dias-Martins</strong> [Marty-D] <small>&ndash; Research (game mechanics), Development</small></p></li>';
 			buf += '<li><p>[<strong>The Immortal</strong>] <small>&ndash; Development</small></p></li></ul>';
 			buf += '<h2>Retired Staff</h2>';
 			buf += '<ul><li><p><a href="http://meltsner.com/" target="_blank" class="subtle"><strong>Bill Meltsner</strong> [bmelts]</a> <small>&ndash; Development</small></p></li>';
-			buf += '<li><p><a href="https://cathyjf.com/" target="_blank" class="subtle"><strong>Cathy J. Fitzpatrick</strong> [cathyjf]</a> <small>&ndash; Development, Sysadmin</small></p></li></ul>';
+			buf += '<li><p><a href="https://cathyjf.com/" target="_blank" class="subtle"><strong>Cathy J. Fitzpatrick</strong> [cathyjf]</a> <small>&ndash; Development, Sysadmin</small></p></li>';
+			buf += '<li><p><strong>Hugh Gordon</strong> [V4] <small>&ndash; Research (game mechanics), Development</small></p></li>';
+			buf += '<li><p><a href="http://www.juanmaserrano.com/" target="_blank" class="subtle"><strong>Juanma Serrano</strong> [Joim]</a> <small>&ndash; Development, Sysadmin</small></p></li></ul>';
 			buf += '<h2>Major Contributors</h2>';
-			buf += '<ul><li><p><strong>Kevin Lau</strong> [Ascriptmaster] <small>&ndash; Development, Art (battle animations)</small></p></li>';
+			buf += '<ul><li><p><strong>Bär Halberkamp</strong> [bumbadadabum] <small>&ndash; Development</small></p></li>';
+			buf += '<li><p><strong>Kevin Lau</strong> [Ascriptmaster] <small>&ndash; Development, Art (battle animations)</small></p></li>';
 			buf += '<li><p><strong>Konrad Borowski</strong> [xfix] <small>&ndash; Development</small></p></li>';
 			buf += '<li><p><strong>Quinton Lee</strong> [sirDonovan] <small>&ndash; Development</small></p></li></ul>';
 			buf += '<h2>More</h2>';

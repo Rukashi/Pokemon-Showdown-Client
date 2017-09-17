@@ -104,8 +104,11 @@ var BattleTooltips = (function () {
 		' ontouchleave="BattleTooltips._handleTouchLeaveFor(event)"' +
 		' ontouchcancel="BattleTooltips._handleTouchLeaveFor(event)"' +
 		' onmouseover="BattleTooltips.showTooltipFor(\'' + roomid + '\', \'' + Tools.escapeHTML('' + thing, true) + '\',\'' + type + '\', this, ' + (ownHeight ? 'true' : 'false') + ')"' +
+		' onfocus="BattleTooltips.showTooltipFor(\'' + roomid + '\', \'' + Tools.escapeHTML('' + thing, true) + '\',\'' + type + '\', this, ' + (ownHeight ? 'true' : 'false') + ')"' +
 		' onmouseout="BattleTooltips.hideTooltip()"' +
-		' onmouseup="BattleTooltips._handleMouseUpFor()"';
+		' onblur="BattleTooltips.hideTooltip()"' +
+		' onmouseup="BattleTooltips._handleMouseUpFor()"' +
+		' aria-describedby="tooltipwrapper"';
 	};
 	BattleTooltips.prototype.showTooltip = function (thing, type, elem, ownHeight) {
 		var room = this.room;
@@ -113,9 +116,10 @@ var BattleTooltips = (function () {
 		var text = '';
 		switch (type) {
 		case 'move':
+		case 'zmove':
 			var move = Tools.getMove(thing);
 			if (!move) return;
-			text = this.showMoveTooltip(move);
+			text = this.showMoveTooltip(move, type === 'zmove');
 			break;
 
 		case 'pokemon':
@@ -124,18 +128,18 @@ var BattleTooltips = (function () {
 			if (!pokemon) return;
 			/* falls through */
 		case 'sidepokemon':
-			var myPokemon;
+			var pokemonData;
 			var isActive = (type === 'pokemon');
 			if (room.myPokemon) {
 				if (!pokemon) {
-					myPokemon = room.myPokemon[parseInt(thing, 10)];
-					pokemon = myPokemon;
+					pokemonData = room.myPokemon[parseInt(thing, 10)];
+					pokemon = pokemonData;
 				} else if (room.controlsShown && pokemon.side === room.battle.mySide) {
 					// battlePokemon = pokemon;
-					myPokemon = room.myPokemon[pokemon.slot];
+					pokemonData = room.myPokemon[pokemon.slot];
 				}
 			}
-			text = this.showPokemonTooltip(pokemon, myPokemon, isActive);
+			text = this.showPokemonTooltip(pokemon, pokemonData, isActive);
 			break;
 		}
 
@@ -155,7 +159,7 @@ var BattleTooltips = (function () {
 		if (y < 140) y = 140;
 		if (x > $(window).width() - 303) x = Math.max($(window).width() - 303, 0);
 
-		if (!$('#tooltipwrapper').length) $(document.body).append('<div id="tooltipwrapper" onclick="$(\'#tooltipwrapper\').html(\'\');"></div>');
+		if (!$('#tooltipwrapper').length) $(document.body).append('<div id="tooltipwrapper" onclick="$(\'#tooltipwrapper\').html(\'\');" role="tooltip"></div>');
 		$('#tooltipwrapper').css({
 			left: x,
 			top: y
@@ -176,14 +180,55 @@ var BattleTooltips = (function () {
 		BattleTooltips.hideTooltip();
 	};
 
-	BattleTooltips.prototype.showMoveTooltip = function (move) {
+	BattleTooltips.prototype.zMoveTable = {
+		Poison: "Acid Downpour",
+		Fighting: "All-Out Pummeling",
+		Dark: "Black Hole Eclipse",
+		Grass: "Bloom Doom",
+		Normal: "Breakneck Blitz",
+		Rock: "Continental Crush",
+		Steel: "Corkscrew Crash",
+		Dragon: "Devastating Drake",
+		Electric: "Gigavolt Havoc",
+		Water: "Hydro Vortex",
+		Fire: "Inferno Overdrive",
+		Ghost: "Never-Ending Nightmare",
+		Bug: "Savage Spin-Out",
+		Psychic: "Shattered Psyche",
+		Ice: "Subzero Slammer",
+		Flying: "Supersonic Skystrike",
+		Ground: "Tectonic Rage",
+		Fairy: "Twinkle Tackle",
+	};
+
+	BattleTooltips.prototype.showMoveTooltip = function (move, isZ) {
 		var text = '';
-		var basePower = move.basePower;
 		var basePowerText = '';
 		var additionalInfo = '';
 		var yourActive = this.battle.yourSide.active;
 		var pokemon = this.battle.mySide.active[this.room.choice.choices.length];
-		var myPokemon = this.room.myPokemon[pokemon.slot];
+		var pokemonData = this.room.myPokemon[pokemon.slot];
+		var ability = toId(pokemonData.ability || pokemon.ability || pokemonData.baseAbility);
+
+		if (isZ) {
+			var item = Tools.getItem(pokemonData.item);
+			if (item.zMoveFrom == move.name) {
+				move = Tools.getMove(item.zMove);
+			} else if (move.category === 'Status') {
+				move = JSON.parse(JSON.stringify(move));
+				move.name = 'Z-' + move.name;
+				// TODO: show zMoveBoost/Effect
+			} else {
+				var zmove = Tools.getMove(this.zMoveTable[item.zMoveType]);
+				zmove = JSON.parse(JSON.stringify(zmove));
+				zmove.category = move.category;
+				zmove.basePower = move.zMovePower;
+				move = zmove;
+				// TODO: Weather Ball type-changing shenanigans
+			}
+		}
+
+		var basePower = move.basePower;
 
 		// Check if there are more than one active Pokémon to check for multiple possible BPs.
 		if (yourActive.length > 1) {
@@ -251,7 +296,7 @@ var BattleTooltips = (function () {
 		if (additionalInfo) text += '<p>' + additionalInfo + '</p>';
 		text += '<p>Accuracy: ' + accuracy + '</p>';
 		if (move.desc) {
-			if (this.battle.gen < 7) {
+			if (this.battle.gen < 7 || this.battle.hardcoreMode) {
 				var desc = move.shortDesc;
 				for (var i = this.battle.gen; i < 7; i++) {
 					if (move.id in BattleTeambuilderTable['gen' + i].overrideMoveDesc) {
@@ -294,16 +339,16 @@ var BattleTooltips = (function () {
 				if ('powder' in move.flags) {
 					text += '<p class="movetag">&#x2713; Powder <small>(doesn\'t affect Grass, Overcoat, Safety Goggles)</small></p>';
 				}
-				if ('punch' in move.flags && (myPokemon.baseAbility === 'ironfist' || pokemon.ability === "Iron Fist")) {
+				if ('punch' in move.flags && ability === 'ironfist') {
 					text += '<p class="movetag">&#x2713; Fist <small>(boosted by Iron Fist)</small></p>';
 				}
-				if ('pulse' in move.flags && (myPokemon.baseAbility === 'megalauncher' || pokemon.ability === "Mega Launcher")) {
+				if ('pulse' in move.flags && ability === 'megalauncher') {
 					text += '<p class="movetag">&#x2713; Pulse <small>(boosted by Mega Launcher)</small></p>';
 				}
-				if ('bite' in move.flags && (myPokemon.baseAbility === 'strongjaw' || pokemon.ability === "Strong Jaw")) {
+				if ('bite' in move.flags && ability === 'strongjaw') {
 					text += '<p class="movetag">&#x2713; Bite <small>(boosted by Strong Jaw)</small></p>';
 				}
-				if ((move.recoil || move.hasCustomRecoil) && (myPokemon.baseAbility === 'reckless' || pokemon.ability === "Reckless")) {
+				if ((move.recoil || move.hasCustomRecoil) && ability === 'reckless') {
 					text += '<p class="movetag">&#x2713; Recoil <small>(boosted by Reckless)</small></p>';
 				}
 				if ('bullet' in move.flags) {
@@ -331,7 +376,7 @@ var BattleTooltips = (function () {
 		return text;
 	};
 
-	BattleTooltips.prototype.showPokemonTooltip = function (pokemon, myPokemon, isActive) {
+	BattleTooltips.prototype.showPokemonTooltip = function (pokemon, pokemonData, isActive) {
 		var text = '';
 		var gender = pokemon.gender;
 		if (gender) gender = ' <img src="' + Tools.resourcePrefix + 'fx/gender-' + gender.toLowerCase() + '.png" alt="' + gender + '" />';
@@ -341,31 +386,14 @@ var BattleTooltips = (function () {
 		var template = pokemon;
 		if (!pokemon.types) template = Tools.getTemplate(pokemon.species);
 		if (pokemon.volatiles && pokemon.volatiles.transform && pokemon.volatiles.formechange) {
-			template = Tools.getTemplate(pokemon.volatiles.formechange[2]);
 			text += '<small>(Transformed into ' + pokemon.volatiles.formechange[2] + ')</small><br />';
 		} else if (pokemon.volatiles && pokemon.volatiles.formechange) {
-			template = Tools.getTemplate(pokemon.volatiles.formechange[2]);
 			text += '<small>(Forme: ' + pokemon.volatiles.formechange[2] + ')</small><br />';
 		}
 
-		var types = template.types;
-		if (this.battle.gen < 7) {
-			var table = BattleTeambuilderTable['gen' + this.battle.gen];
-			if (template.speciesid in table.overrideType) types = table.overrideType[template.speciesid].split('/');
-		}
+		var types = this.getPokemonTypes(pokemon);
 
-		var isTypeChanged = false;
-		if (pokemon.volatiles && pokemon.volatiles.typechange) {
-			isTypeChanged = true;
-			types = pokemon.volatiles.typechange[2].split('/');
-		}
-		if (pokemon.volatiles && pokemon.volatiles.typeadd) {
-			isTypeChanged = true;
-			if (types && types.indexOf(pokemon.volatiles.typeadd[2]) === -1) {
-				types = types.concat(pokemon.volatiles.typeadd[2]);
-			}
-		}
-		if (isTypeChanged) text += '<small>(Type changed)</small><br />';
+		if (pokemon.volatiles && (pokemon.volatiles.typechange || pokemon.volatiles.typeadd)) text += '<small>(Type changed)</small><br />';
 		if (types) {
 			text += types.map(Tools.getTypeIcon).join(' ');
 		} else {
@@ -374,41 +402,44 @@ var BattleTooltips = (function () {
 		text += '</h2>';
 		if (pokemon.fainted) {
 			text += '<p>HP: (fainted)</p>';
+		} else if (this.battle.hardcoreMode) {
+			if (pokemonData) {
+				text += '<p>HP: ' + pokemonData.hp + '/' + pokemonData.maxhp + (pokemon.status ? ' <span class="status ' + pokemon.status + '">' + pokemon.status.toUpperCase() + '</span>' : '') + '</p>';
+			}
 		} else {
 			var exacthp = '';
-			if (myPokemon) exacthp = ' (' + myPokemon.hp + '/' + myPokemon.maxhp + ')';
+			if (pokemonData) exacthp = ' (' + pokemonData.hp + '/' + pokemonData.maxhp + ')';
 			else if (pokemon.maxhp == 48) exacthp = ' <small>(' + pokemon.hp + '/' + pokemon.maxhp + ' pixels)</small>';
 			text += '<p>HP: ' + pokemon.hpDisplay() + exacthp + (pokemon.status ? ' <span class="status ' + pokemon.status + '">' + pokemon.status.toUpperCase() + '</span>' : '') + '</p>';
 		}
-		var showOtherSees = isActive;
-		if (myPokemon) {
+		var showOtherSees = !this.battle.hardcoreMode && isActive;
+		if (pokemonData) {
 			if (this.battle.gen > 2) {
-				var abilityText = '';
-				if (pokemon.ability && (pokemon.ability !== pokemon.baseAbility)) {
-					abilityText = Tools.getAbility(pokemon.ability).name + ' (base: ' + Tools.getAbility(pokemon.baseAbility).name + ')';
-				} else {
-					abilityText = Tools.getAbility(myPokemon.baseAbility).name;
+				var abilityText = Tools.getAbility(pokemonData.baseAbility).name;
+				var ability = Tools.getAbility(pokemonData.ability || pokemon.ability).name;
+				if (ability && (ability !== abilityText)) {
+					abilityText = ability + ' (base: ' + abilityText + ')';
 				}
 				text += '<p>Ability: ' + abilityText;
-				if (myPokemon.item) {
-					text += ' / Item: ' + Tools.getItem(myPokemon.item).name;
+				if (pokemonData.item) {
+					text += ' / Item: ' + Tools.getItem(pokemonData.item).name;
 				}
 				text += '</p>';
-			} else if (myPokemon.item) {
-				item = Tools.getItem(myPokemon.item).name;
+			} else if (pokemonData.item) {
+				item = Tools.getItem(pokemonData.item).name;
 				text += '<p>Item: ' + item + '</p>';
 			}
-			text += '<p>' + myPokemon.stats['atk'] + '&nbsp;Atk /&nbsp;' + myPokemon.stats['def'] + '&nbsp;Def /&nbsp;' + myPokemon.stats['spa'];
+			text += '<p>' + pokemonData.stats['atk'] + '&nbsp;Atk /&nbsp;' + pokemonData.stats['def'] + '&nbsp;Def /&nbsp;' + pokemonData.stats['spa'];
 			if (this.battle.gen === 1) {
 				text += '&nbsp;Spc /&nbsp;';
 			} else {
-				text += '&nbsp;SpA /&nbsp;' + myPokemon.stats['spd'] + '&nbsp;SpD /&nbsp;';
+				text += '&nbsp;SpA /&nbsp;' + pokemonData.stats['spd'] + '&nbsp;SpD /&nbsp;';
 			}
-			text += myPokemon.stats['spe'] + '&nbsp;Spe</p>';
-			if (isActive) {
+			text += pokemonData.stats['spe'] + '&nbsp;Spe</p>';
+			if (showOtherSees) {
 				if (this.battle.gen > 1) {
-					var modifiedStats = this.calculateModifiedStats(pokemon, myPokemon);
-					var statsText = this.makeModifiedStatText(myPokemon, modifiedStats);
+					var modifiedStats = this.calculateModifiedStats(pokemon, pokemonData);
+					var statsText = this.makeModifiedStatText(pokemonData, modifiedStats);
 					if (statsText.match('<b')) {
 						text += '<p>After Modifiers:</p>';
 						text += statsText;
@@ -417,7 +448,7 @@ var BattleTooltips = (function () {
 				text += '<p class="section">Opponent sees:</p>';
 			}
 		} else {
-			showOtherSees = true;
+			showOtherSees = !this.battle.hardcoreMode;
 		}
 		if (this.battle.gen > 2 && showOtherSees) {
 			if (!pokemon.baseAbility && !pokemon.ability) {
@@ -430,6 +461,7 @@ var BattleTooltips = (function () {
 					text += '<p>Possible abilities: ' + Tools.getAbility(ability0).name;
 					if (template.abilities['1']) text += ', ' + Tools.getAbility(template.abilities['1']).name;
 					if (this.battle.gen > 4 && template.abilities['H']) text += ', ' + Tools.getAbility(template.abilities['H']).name;
+					if (this.battle.gen > 6 && template.abilities['S']) text += ', ' + Tools.getAbility(template.abilities['S']).name;
 					text += '</p>';
 				}
 			} else if (pokemon.ability) {
@@ -461,11 +493,11 @@ var BattleTooltips = (function () {
 			}
 		}
 
-		if (myPokemon && !isActive) {
+		if (pokemonData && !isActive) {
 			text += '<p class="section">';
 			var battlePokemon = this.battle.getPokemon(pokemon.ident, pokemon.details);
-			for (var i = 0; i < myPokemon.moves.length; i++) {
-				var move = Tools.getMove(myPokemon.moves[i]);
+			for (var i = 0; i < pokemonData.moves.length; i++) {
+				var move = Tools.getMove(pokemonData.moves[i]);
 				var name = move.name;
 				var pp = 0, maxpp = 0;
 				if (battlePokemon && battlePokemon.moveTrack) {
@@ -479,7 +511,7 @@ var BattleTooltips = (function () {
 				text += '&#8226; ' + name + '<br />';
 			}
 			text += '</p>';
-		} else if (pokemon.moveTrack && pokemon.moveTrack.length) {
+		} else if (!this.battle.hardcoreMode && pokemon.moveTrack && pokemon.moveTrack.length) {
 			text += '<p class="section">';
 			for (var i = 0; i < pokemon.moveTrack.length; i++) {
 				text += '&#8226; ' + this.getPPUseText(pokemon.moveTrack[i]) + '<br />';
@@ -490,10 +522,10 @@ var BattleTooltips = (function () {
 		return text;
 	};
 
-	BattleTooltips.prototype.calculateModifiedStats = function (pokemon, myPokemon) {
+	BattleTooltips.prototype.calculateModifiedStats = function (pokemon, pokemonData) {
 		var stats = {};
-		for (var statName in myPokemon.stats) {
-			stats[statName] = myPokemon.stats[statName];
+		for (var statName in pokemonData.stats) {
+			stats[statName] = pokemonData.stats[statName];
 
 			if (pokemon.boosts && pokemon.boosts[statName]) {
 				var boostTable = [1, 1.5, 2, 2.5, 3, 3.5, 4];
@@ -507,7 +539,7 @@ var BattleTooltips = (function () {
 			}
 		}
 
-		var ability = toId(pokemon.ability || myPokemon.baseAbility);
+		var ability = toId(pokemonData.ability || pokemon.ability || pokemonData.baseAbility);
 		if ('gastroacid' in pokemon.volatiles) ability = '';
 
 		// check for burn, paralysis, guts, quick feet
@@ -537,7 +569,7 @@ var BattleTooltips = (function () {
 			return stats;
 		}
 
-		var item = toId(myPokemon.item);
+		var item = toId(pokemonData.item);
 		if (ability === 'klutz' && item !== 'machobrace') item = '';
 		var species = pokemon.baseSpecies;
 
@@ -592,9 +624,6 @@ var BattleTooltips = (function () {
 		if (item === 'choiceband') {
 			stats.atk = Math.floor(stats.atk * 1.5);
 		}
-		if (ability === 'toxicboost' && (pokemon.status === 'tox' || pokemon.status === 'psn')) {
-			stats.atk = Math.floor(stats.atk * 1.5);
-		}
 		if (ability === 'purepower' || ability === 'hugepower') {
 			stats.atk *= 2;
 		}
@@ -602,12 +631,21 @@ var BattleTooltips = (function () {
 			stats.atk = Math.floor(stats.atk * 1.5);
 		}
 		if (weather) {
-			if (ability === 'flowergift' && (weather === 'sunnyday' || weather === 'desolateland')) {
-				stats.atk = Math.floor(stats.atk * 1.5);
-				stats.spd = Math.floor(stats.spd * 1.5);
-			}
-			if (ability === 'solarpower' && (weather === 'sunnyday' || weather === 'desolateland')) {
-				stats.spa = Math.floor(stats.spa * 1.5);
+			if (weather === 'sunnyday' || weather === 'desolateland') {
+				if (ability === 'solarpower') {
+					stats.spa = Math.floor(stats.spa * 1.5);
+				}
+				var allyActive = pokemon.side.active;
+				if (allyActive.length > 1) {
+					for (var i = 0; i < allyActive.length; i++) {
+						var ally = allyActive[i];
+						if (!ally || ally.fainted) continue;
+						if (ally.ability === 'flowergift' && (ally.baseSpecies === 'Cherrim' || this.battle.gen <= 4)) {
+							stats.atk = Math.floor(stats.atk * 1.5);
+							stats.spd = Math.floor(stats.spd * 1.5);
+						}
+					}
+				}
 			}
 			if (this.battle.gen >= 4 && (pokemon.types[0] === 'Rock' || pokemon.types[1] === 'Rock') && weather === 'sandstorm') {
 				stats.spd = Math.floor(stats.spd * 1.5);
@@ -625,7 +663,7 @@ var BattleTooltips = (function () {
 				stats.spe *= 2;
 			}
 		}
-		if (ability === 'defeatist' && myPokemon.hp <= myPokemon.maxhp / 2) {
+		if (ability === 'defeatist' && pokemonData.hp <= pokemonData.maxhp / 2) {
 			stats.atk = Math.floor(stats.atk * 0.5);
 			stats.spa = Math.floor(stats.spa * 0.5);
 		}
@@ -652,9 +690,6 @@ var BattleTooltips = (function () {
 			stats.spe *= 2;
 		}
 		if (item === 'choicespecs') {
-			stats.spa = Math.floor(stats.spa * 1.5);
-		}
-		if (ability === 'flareboost' && pokemon.status === 'brn') {
 			stats.spa = Math.floor(stats.spa * 1.5);
 		}
 		if (item === 'deepseatooth' && species === 'Clamperl') {
@@ -697,28 +732,28 @@ var BattleTooltips = (function () {
 		return stats;
 	};
 
-	BattleTooltips.prototype.makeModifiedStatText = function (myPokemon, modifiedStats) {
+	BattleTooltips.prototype.makeModifiedStatText = function (pokemonData, modifiedStats) {
 		var statsText = '<p>';
 		var statTable = {atk: '&nbsp;Atk /&nbsp;', def: '&nbsp;Def /&nbsp;', spa: '&nbsp;SpA /&nbsp;',
 						 spc: '&nbsp;Spc /&nbsp;', spd: '&nbsp;SpD /&nbsp;', spe: '&nbsp;Spe</p>'};
-		statsText += this.boldModifiedStat(myPokemon, modifiedStats, 'atk') + statTable['atk'];
-		statsText += this.boldModifiedStat(myPokemon, modifiedStats, 'def') + statTable['def'];
-		statsText += this.boldModifiedStat(myPokemon, modifiedStats, 'spa');
+		statsText += this.boldModifiedStat(pokemonData, modifiedStats, 'atk') + statTable['atk'];
+		statsText += this.boldModifiedStat(pokemonData, modifiedStats, 'def') + statTable['def'];
+		statsText += this.boldModifiedStat(pokemonData, modifiedStats, 'spa');
 		if (this.battle.gen === 1) {
 			statsText += statTable['spc'];
 		} else {
 			statsText += statTable['spa'];
-			statsText += this.boldModifiedStat(myPokemon, modifiedStats, 'spd') + statTable['spd'];
+			statsText += this.boldModifiedStat(pokemonData, modifiedStats, 'spd') + statTable['spd'];
 		}
-		statsText += this.boldModifiedStat(myPokemon, modifiedStats, 'spe') + statTable['spe'];
+		statsText += this.boldModifiedStat(pokemonData, modifiedStats, 'spe') + statTable['spe'];
 		return statsText;
 	};
 
-	BattleTooltips.prototype.boldModifiedStat = function (myPokemon, modifiedStats, statName) {
+	BattleTooltips.prototype.boldModifiedStat = function (pokemonData, modifiedStats, statName) {
 		var statText = '';
-		if (myPokemon.stats[statName] === modifiedStats[statName]) {
+		if (pokemonData.stats[statName] === modifiedStats[statName]) {
 			statText += '' + modifiedStats[statName];
-		} else if (myPokemon.stats[statName] > modifiedStats[statName]) {
+		} else if (pokemonData.stats[statName] > modifiedStats[statName]) {
 			statText += '<b class="stat-lowered">' + modifiedStats[statName] + '</b>';
 		} else {
 			statText += '<b class="stat-boosted">' + modifiedStats[statName] + '</b>';
@@ -731,8 +766,7 @@ var BattleTooltips = (function () {
 		var ppUsed = moveTrackRow[1];
 		var move, maxpp;
 		if (moveName.charAt(0) === '*') {
-			moveName = moveName.substr(1);
-			move = Tools.getMove(moveName);
+			move = Tools.getMove(moveName.substr(1));
 			maxpp = 5;
 		} else {
 			move = Tools.getMove(moveName);
@@ -744,38 +778,42 @@ var BattleTooltips = (function () {
 			maxpp = Math.floor(maxpp * 8 / 5);
 		}
 		if (ppUsed === Infinity) return move.name + ' <small>(0/' + maxpp + ')</small>';
-		if (!ppUsed) return move.name + (showKnown ? ' <small>(revealed)</small>' : '');
-		return move.name + ' <small>(' + (maxpp - ppUsed) + '/' + maxpp + ')</small>';
+		if (ppUsed || moveName.charAt(0) === '*') return move.name + ' <small>(' + (maxpp - ppUsed) + '/' + maxpp + ')</small>';
+		return move.name + (showKnown ? ' <small>(revealed)</small>' : '');
 	};
 
 	// Functions to calculate speed ranges of an opponent.
 	BattleTooltips.prototype.getTemplateMinSpeed = function (template, level) {
 		var baseSpe = template.baseStats['spe'];
-		if (this.battle.gen < 7) {
-			var overrideStats = BattleTeambuilderTable['gen' + this.battle.gen].overrideStats[template.id];
+		var tier = this.battle.tier;
+		var gen = this.battle.gen;
+		if (gen < 7) {
+			var overrideStats = BattleTeambuilderTable['gen' + gen].overrideStats[template.id];
 			if (overrideStats && 'spe' in overrideStats) baseSpe = overrideStats['spe'];
 		}
 
-		var nature = (this.battle.tier.indexOf('Random Battle') >= 0 || this.battle.gen < 3) ? 1 : 0.9;
+		var nature = (tier.indexOf('Random Battle') >= 0 || (tier.indexOf('Random') >= 0 && tier.indexOf('Battle') >= 0 && gen >= 7) || gen < 3) ? 1 : 0.9;
 		return Math.floor(Math.floor(2 * baseSpe * level / 100 + 5) * nature);
 	};
 	BattleTooltips.prototype.getTemplateMaxSpeed = function (template, level) {
 		var baseSpe = template.baseStats['spe'];
-		if (this.battle.gen < 7) {
-			var overrideStats = BattleTeambuilderTable['gen' + this.battle.gen].overrideStats[template.id];
+		var tier = this.battle.tier;
+		var gen = this.battle.gen;
+		if (gen < 7) {
+			var overrideStats = BattleTeambuilderTable['gen' + gen].overrideStats[template.id];
 			if (overrideStats && 'spe' in overrideStats) baseSpe = overrideStats['spe'];
 		}
 
-		var iv = (this.battle.gen < 3) ? 30 : 31;
-		var value = iv + (this.battle.tier.indexOf('Random Battle') >= 0 ? 21 : 63);
-		var nature = (this.battle.tier.indexOf('Random Battle') >= 0 || this.battle.gen < 3) ? 1 : 1.1;
+		var iv = (gen < 3) ? 30 : 31;
+		var value = iv + (((tier.indexOf('Random') >= 0 && tier.indexOf('Battle') >= 0 && gen >= 7) || (tier.indexOf('Random Battle') >= 0 && gen >= 3)) ? 21 : 63);
+		var nature = (this.battle.tier.indexOf('Random Battle') >= 0 || gen < 3) ? 1 : 1.1;
 		return Math.floor(Math.floor(Math.floor(2 * baseSpe + value) * level / 100 + 5) * nature);
 	};
 
 	// Gets the proper current type for moves with a variable type.
 	BattleTooltips.prototype.getMoveType = function (move, pokemon) {
-		var myPokemon = this.room.myPokemon[pokemon.slot];
-		var ability = Tools.getAbility(myPokemon.baseAbility).name;
+		var pokemonData = this.room.myPokemon[pokemon.slot] || pokemon;
+		var ability = Tools.getAbility(pokemonData.ability || pokemon.ability || pokemonData.baseAbility).name;
 		var moveType = move.type;
 		// Normalize is the first move type changing effect.
 		if (ability === 'Normalize') {
@@ -787,29 +825,40 @@ var BattleTooltips = (function () {
 		if ((move.id === 'charm' || move.id === 'moonlight' || move.id === 'sweetkiss') && this.battle.gen <= 5) {
 			moveType = 'Normal';
 		}
+		if (move.id === 'revelationdance') {
+			moveType = pokemon.types[0];
+		}
 		// Moves that require an item to change their type.
 		if (!this.battle.hasPseudoWeather('Magic Room') && (!pokemon.volatiles || !pokemon.volatiles['embargo'])) {
 			if (move.id === 'multiattack') {
-				var item = Tools.getItem(myPokemon.item);
+				var item = Tools.getItem(pokemonData.item);
 				if (item.onMemory) moveType = item.onMemory;
 			}
 			if (move.id === 'judgment') {
-				var item = Tools.getItem(myPokemon.item);
+				var item = Tools.getItem(pokemonData.item);
 				if (item.onPlate && !item.zMove) moveType = item.onPlate;
 			}
 			if (move.id === 'technoblast') {
-				var item = Tools.getItem(myPokemon.item);
+				var item = Tools.getItem(pokemonData.item);
 				if (item.onDrive) moveType = item.onDrive;
 			}
 			if (move.id === 'naturalgift') {
-				var item = Tools.getItem(myPokemon.item);
+				var item = Tools.getItem(pokemonData.item);
 				if (item.naturalGift) moveType = item.naturalGift.type;
 			}
 		}
 		// Weather and pseudo-weather type changes.
 		if (move.id === 'weatherball' && this.battle.weather) {
-			// Check if you have an anti weather ability to skip this.
-			var noWeatherAbility = !!(ability in {'Air Lock': 1, 'Cloud Nine': 1});
+			var noWeatherAbility = false;
+			// Check if your side has an anti weather ability to skip this.
+			if (!noWeatherAbility) {
+				for (var i = 0; i < this.battle.mySide.active.length; i++) {
+					if (this.battle.mySide.active[i] && this.battle.mySide.active[i].ability in {'Air Lock': 1, 'Cloud Nine': 1}) {
+						noWeatherAbility = true;
+						break;
+					}
+				}
+			}
 			// If you don't, check if the opponent has it afterwards.
 			if (!noWeatherAbility) {
 				for (var i = 0; i < this.battle.yourSide.active.length; i++) {
@@ -839,10 +888,14 @@ var BattleTooltips = (function () {
 		return moveType;
 	};
 
+	BattleTooltips.prototype.makePercentageChangeText = function (boost, source) {
+		return ' (&times;' + boost + ' from ' + source + ')';
+	};
+
 	// Gets the current accuracy for a move.
 	BattleTooltips.prototype.getMoveAccuracy = function (move, pokemon) {
-		var myPokemon = this.room.myPokemon[pokemon.slot];
-		var ability = Tools.getAbility(pokemon.ability || myPokemon.baseAbility).name;
+		var pokemonData = this.room.myPokemon[pokemon.slot];
+		var ability = Tools.getAbility(pokemonData.ability || pokemon.ability || pokemonData.baseAbility).name;
 		var accuracy = move.accuracy;
 		if (this.battle.gen < 7) {
 			var table = BattleTeambuilderTable['gen' + this.battle.gen];
@@ -872,28 +925,27 @@ var BattleTooltips = (function () {
 		}
 		if (ability === 'Hustle' && move.category === 'Physical') {
 			accuracy *= 0.8;
-			accuracyComment += ' (Reduced by Hustle)';
+			accuracyComment += this.makePercentageChangeText(0.8, 'Hustle');
 		}
 		if (ability === 'Compound Eyes') {
 			accuracy *= 1.3;
-			accuracyComment += ' (Boosted by Compound Eyes)';
+			accuracyComment += this.makePercentageChangeText(1.3, 'Compound Eyes');
 		}
 		for (var i = 0; i < pokemon.side.active.length; i++) {
-			if (!pokemon.side.active[i]) continue;
-			var sidePokemon = this.room.myPokemon[pokemon.side.active[i].slot];
-			ability = Tools.getAbility(sidePokemon.baseAbility).name;
+			if (!pokemon.side.active[i] || pokemon.side.active[i].fainted) continue;
+			ability = Tools.getAbility(pokemon.side.pokemon[i].ability).name;
 			if (ability === 'Victory Star') {
 				accuracy *= 1.1;
-				accuracyComment += ' (Boosted by Victory Star)';
+				accuracyComment += this.makePercentageChangeText(1.1, 'Victory Star');
 			}
 		}
-		if (myPokemon.item === 'widelens' && !this.battle.hasPseudoWeather('Magic Room') && !(pokemon.volatiles && pokemon.volatiles['embargo'])) {
+		if (pokemonData.item === 'widelens' && !this.battle.hasPseudoWeather('Magic Room') && !(pokemon.volatiles && pokemon.volatiles['embargo'])) {
 			accuracy *= 1.1;
-			accuracyComment += ' (Boosted by Wide Lens)';
+			accuracyComment += this.makePercentageChangeText(1.1, 'Wide Lens');
 		}
 		if (this.battle.hasPseudoWeather('Gravity')) {
 			accuracy *= 5 / 3;
-			accuracyComment += ' (Boosted by Gravity)';
+			accuracyComment += this.makePercentageChangeText(1.66, 'Gravity');
 		}
 		return Math.round(accuracy) + accuracyComment;
 	};
@@ -902,8 +954,10 @@ var BattleTooltips = (function () {
 	// Takes into account the target for some moves.
 	// If it is unsure of the actual base power, it gives an estimate.
 	BattleTooltips.prototype.getMoveBasePower = function (move, pokemon, target) {
-		var myPokemon = this.room.myPokemon[pokemon.slot];
-		var ability = Tools.getAbility(myPokemon.baseAbility).name;
+		if (!target) target = this.room.myPokemon[0]; // fallback
+		var pokemonData = this.room.myPokemon[pokemon.slot];
+		if (!pokemonData) return '' + move.basePower;
+		var ability = Tools.getAbility(pokemonData.ability || pokemon.ability || pokemonData.baseAbility).name;
 		var item = {};
 		var basePower = move.basePower;
 		if (this.battle.gen < 7) {
@@ -911,11 +965,30 @@ var BattleTooltips = (function () {
 			if (move.id in table.overrideBP) basePower = table.overrideBP[move.id];
 		}
 		var basePowerComment = '';
-		var thereIsWeather = (this.battle.weather in {'sunnyday': 1, 'desolateland': 1, 'raindance': 1, 'primordialsea': 1, 'sandstorm': 1, 'hail':1});
+		var noWeatherAbility = false;
+		// Check if your side has an anti weather ability to skip this.
+		if (!noWeatherAbility) {
+			for (var i = 0; i < this.battle.mySide.active.length; i++) {
+				if (this.battle.mySide.active[i] && this.battle.mySide.active[i].ability in {'Air Lock': 1, 'Cloud Nine': 1}) {
+					noWeatherAbility = true;
+					break;
+				}
+			}
+		}
+		// If you don't, check if the opponent has it afterwards.
+		if (!noWeatherAbility) {
+			for (var i = 0; i < this.battle.yourSide.active.length; i++) {
+				if (this.battle.yourSide.active[i] && this.battle.yourSide.active[i].ability in {'Air Lock': 1, 'Cloud Nine': 1}) {
+					noWeatherAbility = true;
+					break;
+				}
+			}
+		}
+		var thereIsWeather = !!this.battle.weather && !noWeatherAbility;
 		if (move.id === 'acrobatics') {
-			if (!myPokemon.item) {
+			if (!pokemonData.item) {
 				basePower *= 2;
-				basePowerComment = ' (Boosted by lack of item)';
+				basePowerComment = this.makePercentageChangeText(2, 'Acrobatics + no item');
 			}
 		}
 		if (move.id === 'crushgrip' || move.id === 'wringout') {
@@ -927,7 +1000,7 @@ var BattleTooltips = (function () {
 		}
 		if (move.id === 'facade' && !(pokemon.status in {'': 1, 'slp': 1, 'frz': 1})) {
 			basePower *= 2;
-			basePowerComment = ' (Boosted by status)';
+			basePowerComment = this.makePercentageChangeText(2, 'Facade + status');
 		}
 		if (move.id === 'flail' || move.id === 'reversal') {
 			if (this.battle.gen > 4) {
@@ -947,7 +1020,7 @@ var BattleTooltips = (function () {
 		}
 		if (move.id === 'hex' && target.status) {
 			basePower *= 2;
-			basePowerComment = ' (Boosted by status)';
+			basePowerComment = this.makePercentageChangeText(2, 'Hex + status');
 		}
 		if (move.id === 'punishment') {
 			var boosts = Object.keys(target.boosts);
@@ -961,7 +1034,7 @@ var BattleTooltips = (function () {
 		if (move.id === 'smellingsalts') {
 			if (target.status === 'par') {
 				basePower *= 2;
-				basePowerComment = ' (Boosted by status)';
+				basePowerComment = this.makePercentageChangeText(2, 'Smelling Salts + Paralysis');
 			}
 		}
 		if (move.id === 'storedpower' || move.id == 'powertrip') {
@@ -982,17 +1055,20 @@ var BattleTooltips = (function () {
 		if (move.id === 'venoshock') {
 			if (target.status === 'psn' || target.status === 'tox') {
 				basePower *= 2;
-				basePowerComment = ' (Boosted by status)';
+				basePowerComment = this.makePercentageChangeText(2, 'Venoshock + Poison');
 			}
 		}
 		if (move.id === 'wakeupslap') {
 			if (target.status === 'slp') {
 				basePower *= 2;
-				basePowerComment = ' (Boosted by status)';
+				basePowerComment = this.makePercentageChangeText(2, 'Wake-Up Slap + Sleep');
 			}
 		}
 		if (move.id === 'weatherball' && thereIsWeather) {
 			basePower = 100;
+		}
+		if (move.id === 'watershuriken' && pokemon.species === 'Greninja-Ash' && pokemon.ability === 'Battle Bond') {
+			basePower += 5;
 		}
 		// Moves that check opponent speed.
 		var template = target;
@@ -1000,8 +1076,8 @@ var BattleTooltips = (function () {
 		if (move.id === 'electroball') {
 			var min = 0;
 			var max = 0;
-			var minRatio = (myPokemon.stats['spe'] / this.getTemplateMaxSpeed(template, target.level));
-			var maxRatio = (myPokemon.stats['spe'] / this.getTemplateMinSpeed(template, target.level));
+			var minRatio = (pokemonData.stats['spe'] / this.getTemplateMaxSpeed(template, target.level));
+			var maxRatio = (pokemonData.stats['spe'] / this.getTemplateMinSpeed(template, target.level));
 			if (minRatio >= 4) min = 150;
 			else if (minRatio >= 3) min = 120;
 			else if (minRatio >= 2) min = 80;
@@ -1016,16 +1092,16 @@ var BattleTooltips = (function () {
 			return this.boostBasePowerRange(move, pokemon, min, max);
 		}
 		if (move.id === 'gyroball') {
-			var min = (Math.floor(25 * this.getTemplateMinSpeed(template, target.level) / myPokemon.stats['spe']) || 1);
-			var max = (Math.floor(25 * this.getTemplateMaxSpeed(template, target.level) / myPokemon.stats['spe']) || 1);
+			var min = (Math.floor(25 * this.getTemplateMinSpeed(template, target.level) / pokemonData.stats['spe']) || 1);
+			var max = (Math.floor(25 * this.getTemplateMaxSpeed(template, target.level) / pokemonData.stats['spe']) || 1);
 			if (min > 150) min = 150;
 			if (max > 150) max = 150;
 			// Special case due to range as well.
 			return this.boostBasePowerRange(move, pokemon, min, max);
 		}
 		// Movements which have base power changed due to items.
-		if (myPokemon.item && !this.battle.hasPseudoWeather('Magic Room') && (!pokemon.volatiles || !pokemon.volatiles['embargo'])) {
-			item = Tools.getItem(myPokemon.item);
+		if (pokemonData.item && !this.battle.hasPseudoWeather('Magic Room') && (!pokemon.volatiles || !pokemon.volatiles['embargo'])) {
+			item = Tools.getItem(pokemonData.item);
 			if (move.id === 'fling') {
 				if (item.fling) basePower = item.fling.basePower;
 			}
@@ -1061,29 +1137,131 @@ var BattleTooltips = (function () {
 		if (!basePower) return basePowerComment;
 
 		// Other ability boosts.
+		var abilityBoost = 0;
 		if (ability === 'Water Bubble' && move.type === 'Water') {
-			basePower *= 2;
-			basePowerComment = ' (Water Bubble boosted)';
-		}
-		if (ability === 'Steelworker' && move.type === 'Steel') {
-			basePower *= 1.5;
-			basePowerComment = ' (Steelworker boosted)';
-		}
-		if (ability === 'Technician' && basePower <= 60) {
-			basePower *= 1.5;
-			basePowerComment = ' (Technician boosted)';
-		}
-		if (move.type === 'Normal' && move.category !== 'Status' &&
+			abilityBoost = 2;
+		} else if ((ability === 'Flare Boost' && pokemon.status === 'brn' && move.category === 'Special') ||
+			(ability === 'Mega Launcher' && move.flags['pulse']) ||
+			(ability === 'Steelworker' && move.type === 'Steel') ||
+			(ability === 'Strong Jaw' && move.flags['bite']) ||
+			(ability === 'Technician' && basePower <= 60) ||
+			(ability === 'Toxic Boost' && (pokemon.status === 'psn' || pokemon.status === 'tox') && move.category === 'Physical') ||
+			(ability === 'Overgrow' && move.type === 'Grass' && pokemonData.hp * 3 <= pokemonData.maxhp) ||
+			(ability === 'Blaze' && move.type === 'Fire' && pokemonData.hp * 3 <= pokemonData.maxhp) ||
+			(ability === 'Torrent' && move.type === 'Water' && pokemonData.hp * 3 <= pokemonData.maxhp) ||
+			(ability === 'Swarm' && move.type === 'Bug' && pokemonData.hp * 3 <= pokemonData.maxhp)) {
+			abilityBoost = 1.5;
+		} else if ((ability === 'Sand Force' && this.battle.weather === 'sandstorm' && (move.type === 'Rock' || move.type === 'Ground' || move.type === 'Steel')) ||
+			(ability === 'Sheer Force' && move.secondaries) ||
+			(ability === 'Tough Claws' && move.flags['contact'])) {
+			abilityBoost = 1.3;
+		} else if (ability === 'Rivalry' && pokemon.gender && target.gender) {
+			if (pokemon.gender === target.gender) {
+				abilityBoost = 1.25;
+			} else {
+				abilityBoost = 0.75;
+			}
+		} else if (move.type === 'Normal' && move.category !== 'Status' &&
+			ability in {'Aerilate': 1, 'Galvanize':1, 'Pixilate': 1, 'Refrigerate': 1} &&
 			!(move.id in {'naturalgift': 1, 'struggle': 1} ||
-			  move.id === 'weatherball' && thereIsWeather ||
-			  move.id === 'multiattack' && item.onMemory ||
-			  move.id === 'judgment' && item.onPlate ||
-			  move.id === 'technoblast' && item.onDrive)) {
-			if (ability in {'Aerilate': 1, 'Galvanize':1, 'Pixilate': 1, 'Refrigerate': 1} || this.battle.gen > 6 && ability == 'Normalize') {
-				basePower = Math.floor(basePower * (this.battle.gen > 6 ? 1.2 : 1.3));
-				basePowerComment = ' (' + ability + ' boosted)';
+				move.id === 'weatherball' && thereIsWeather ||
+				move.id === 'multiattack' && item.onMemory ||
+				move.id === 'judgment' && item.onPlate ||
+				move.id === 'technoblast' && item.onDrive)) {
+			abilityBoost = (this.battle.gen > 6 ? 1.2 : 1.3);
+		} else if ((ability === 'Iron Fist' && move.flags['punch']) ||
+			(ability === 'Reckless' && (move.recoil || move.hasCustomRecoil)) ||
+			(ability === 'Normalize' && this.battle.gen > 6)) {
+			abilityBoost = 1.2;
+		}
+		if (abilityBoost) {
+			basePower = Math.floor(basePower * abilityBoost);
+			basePowerComment += this.makePercentageChangeText(abilityBoost, ability);
+		}
+
+		var allyActive = pokemon.side.active;
+		var auraBoosted = '';
+		var auraBroken = false;
+		if (move.category !== 'Status' && allyActive.length > 1) {
+			for (var i = 0; i < allyActive.length; i++) {
+				var ally = allyActive[i];
+				if (!ally || ally.fainted) continue;
+				if (ally.ability === 'Fairy Aura') {
+					if (move.type === 'Fairy') auraBoosted = 'Fairy Aura';
+				} else if (ally.ability === 'Dark Aura') {
+					if (move.type === 'Dark') auraBoosted = 'Dark Aura';
+				} else if (ally.ability === 'Aura Break') {
+					auraBroken = true;
+				} else if (ally.ability === 'Battery') {
+					if (ally !== pokemon && move.category === 'Special') {
+						basePower = Math.floor(basePower * 1.3);
+						basePowerComment += this.makePercentageChangeText(1.3, 'Battery');
+					}
+				}
 			}
 		}
+		var foeActive = this.battle.yourSide.active;
+		var doneLooking = auraBoosted && auraBroken;
+		if (!doneLooking && move.category !== 'Status' && (move.type === 'Fairy' || move.type === 'Dark')) {
+			for (var i = 0; i < foeActive.length; i++) {
+				var foe = foeActive[i];
+				if (!foe || foe.fainted) continue;
+				if (foe.ability === 'Fairy Aura') {
+					if (move.type === 'Fairy') auraBoosted = 'Fairy Aura';
+				} else if (foe.ability === 'Dark Aura') {
+					if (move.type === 'Dark') auraBoosted = 'Dark Aura';
+				} else if (foe.ability === 'Aura Break') {
+					auraBroken = true;
+				}
+			}
+		}
+		if (auraBoosted) {
+			if (auraBroken) {
+				basePower = Math.floor(basePower * 0.75);
+				basePowerComment += this.makePercentageChangeText(0.75, auraBoosted + ' + Aura Break');
+			} else {
+				basePower = Math.floor(basePower * 1.33);
+				basePowerComment += this.makePercentageChangeText(1.33, auraBoosted);
+			}
+		}
+
+		// Field Effects
+		var types = this.getPokemonTypes(pokemon);
+		var isGrounded = true;
+		var noItem = !pokemonData.item || this.battle.hasPseudoWeather('Magic Room') || pokemonData.volatiles && pokemonData.volatiles['embargo'];
+		if (this.battle.hasPseudoWeather('Gravity')) {
+			isGrounded = true;
+		} else if (pokemonData.volatiles && pokemonData.volatiles['ingrain'] && this.battle.gen >= 4) {
+			isGrounded = true;
+		} else if (pokemonData.volatiles && pokemonData.volatiles['smackdown']) {
+			isGrounded = true;
+		} else if (!noItem && pokemonData.item === 'ironball') {
+			isGrounded = true;
+		} else if (ability === 'levitate') {
+			isGrounded = false;
+		} else if (pokemonData.volatiles && (pokemonData.volatiles['magnetrise'] || pokemonData.volatiles['telekinesis'])) {
+			isGrounded = false;
+		} else if (!noItem && pokemonData.item !== 'airballoon') {
+			isGrounded = false;
+		} else if (!(pokemonData.volatiles && pokemonData.volatiles['roost'])) {
+			// If a Fire/Flying type uses Burn Up and Roost, it becomes ???/Flying-type, but it's still grounded.
+			for (var i = 0; i < types.length; i++) {
+				if (types[i] === 'Flying') isGrounded = false;
+				break;
+			}
+		}
+		if (isGrounded) {
+			if ((this.battle.hasPseudoWeather('Electric Terrain') && move.type === 'Electric') ||
+				(this.battle.hasPseudoWeather('Grassy Terrain') && move.type === 'Grass') ||
+				(this.battle.hasPseudoWeather('Psychic Terrain') && move.type === 'Psychic')) {
+				basePower = Math.floor(basePower * 1.5);
+				basePowerComment += this.makePercentageChangeText(1.5, move.type + (move.type === 'Grass' ? 'y Terrain' : ' Terrain'));
+			} else if (this.battle.hasPseudoWeather('Misty Terrain') && move.type === 'Dragon') {
+				basePower = Math.floor(basePower / 2);
+				basePowerComment += this.makePercentageChangeText(0.5, 'Misty Terrain');
+			}
+		}
+
 		return this.boostBasePower(move, pokemon, basePower, basePowerComment);
 	};
 
@@ -1113,6 +1291,19 @@ var BattleTooltips = (function () {
 		'Spell Tag': 'Ghost',
 		'TwistedSpoon': 'Psychic'
 	};
+	var orbUsers = {
+		'Latias': 'Soul Dew',
+		'Latios': 'Soul Dew',
+		'Dialga': 'Adamant Orb',
+		'Palkia': 'Lustrous Orb',
+		'Giratina': 'Griseous Orb',
+	};
+	var orbTypes = {
+		'Soul Dew': 'Psychic',
+		'Adamant Orb': 'Steel',
+		'Lustrous Orb': 'Water',
+		'Griseous Orb': 'Ghost',
+	};
 	var noGemMoves = {
 		'Fire Pledge': 1,
 		'Fling': 1,
@@ -1121,10 +1312,10 @@ var BattleTooltips = (function () {
 		'Water Pledge': 1
 	};
 	BattleTooltips.prototype.getItemBoost = function (move, pokemon) {
-		var myPokemon = this.room.myPokemon[pokemon.slot];
-		if (!myPokemon.item || this.battle.hasPseudoWeather('Magic Room') || pokemon.volatiles && pokemon.volatiles['embargo']) return 0;
+		var pokemonData = this.room.myPokemon[pokemon.slot];
+		if (!pokemonData.item || this.battle.hasPseudoWeather('Magic Room') || pokemon.volatiles && pokemon.volatiles['embargo']) return 0;
 
-		var item = Tools.getItem(myPokemon.item);
+		var item = Tools.getItem(pokemonData.item);
 		var moveType = this.getMoveType(move, pokemon);
 		var itemName = item.name;
 		var moveName = move.name;
@@ -1138,6 +1329,10 @@ var BattleTooltips = (function () {
 		// Type-enhancing items
 		if (itemTypes[item.name] === moveType) return this.battle.gen < 4 ? 1.1 : 1.2;
 
+		// Pokemon-specific items
+		if (item.name === 'Soul Dew' && this.battle.gen < 7) return 0;
+		if (orbUsers[pokemonData.baseSpecies] === item.name && (orbTypes[item.name] === moveType || moveType === 'Dragon')) return 1.2;
+
 		// Gems
 		if (moveName in noGemMoves) return 0;
 		if (itemName === moveType + ' Gem') return this.battle.gen < 6 ? 1.5 : 1.3;
@@ -1148,14 +1343,14 @@ var BattleTooltips = (function () {
 		var itemBoost = this.getItemBoost(move, pokemon);
 		if (itemBoost) {
 			basePower = Math.floor(basePower * itemBoost);
-			var myPokemon = this.room.myPokemon[pokemon.slot];
-			basePowerComment += ' (Boosted by ' + Tools.getItem(myPokemon.item).name + ')';
+			var pokemonData = this.room.myPokemon[pokemon.slot];
+			basePowerComment += this.makePercentageChangeText(itemBoost, Tools.getItem(pokemonData.item).name);
 		}
 		return basePower + basePowerComment;
 	};
 	BattleTooltips.prototype.boostBasePowerRange = function (move, pokemon, min, max) {
-		var myPokemon = this.room.myPokemon[pokemon.slot];
-		var technician = Tools.getAbility(myPokemon.baseAbility).name === 'Technician';
+		var pokemonData = this.room.myPokemon[pokemon.slot];
+		var technician = Tools.getAbility(pokemonData.ability || pokemon.ability || pokemonData.baseAbility).name === 'Technician';
 		if (technician) {
 			if (min <= 60) min *= 1.5;
 			if (max <= 60) max *= 1.5;
@@ -1167,9 +1362,29 @@ var BattleTooltips = (function () {
 		}
 		var basePowerComment = min === max ? '' : Math.floor(min) + ' to ';
 		basePowerComment += Math.floor(max);
-		if (technician) basePowerComment += ' (Technician boosted)';
-		if (itemBoost) basePowerComment += ' (Boosted by ' + Tools.getItem(myPokemon.item).name + ')';
+		if (technician) basePowerComment += this.makePercentageChangeText(1.5, 'Technician');
+		if (itemBoost) basePowerComment += this.makePercentageChangeText(itemBoost, Tools.getItem(pokemonData.item).name);
 		return basePowerComment;
+	};
+	BattleTooltips.prototype.getPokemonTypes = function (pokemon) {
+		var template = pokemon;
+		if (!pokemon.types) template = Tools.getTemplate(pokemon.species);
+		if (pokemon.volatiles && pokemon.volatiles.transform && pokemon.volatiles.formechange) {
+			template = Tools.getTemplate(pokemon.volatiles.formechange[2]);
+		} else if (pokemon.volatiles && pokemon.volatiles.formechange) {
+			template = Tools.getTemplate(pokemon.volatiles.formechange[2]);
+		}
+
+		var types = template.types;
+		if (this.battle.gen < 7) {
+			var table = BattleTeambuilderTable['gen' + this.battle.gen];
+			if (template.speciesid in table.overrideType) types = table.overrideType[template.speciesid].split('/');
+		}
+
+		if (pokemon.volatiles && pokemon.volatiles.typeadd) {
+			if (types && types.indexOf(pokemon.volatiles.typeadd[2]) === -1) types = types.concat(pokemon.volatiles.typeadd[2]);
+		}
+		return types;
 	};
 	return BattleTooltips;
 })();

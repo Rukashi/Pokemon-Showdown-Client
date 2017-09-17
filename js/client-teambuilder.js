@@ -124,7 +124,7 @@
 		update: function () {
 			teams = Storage.teams;
 			if (this.curTeam) {
-				this.ignoreEVLimits = (this.curTeam.gen < 3);
+				this.ignoreEVLimits = (this.curTeam.gen < 3 || this.curTeam.format === 'gen7balancedhackmons');
 				if (this.curSet) {
 					return this.updateSetView();
 				}
@@ -241,7 +241,7 @@
 				case 'gen5': format = 'C' + format.slice(4); break;
 				case 'gen6': format = 'B' + format.slice(4); break;
 				case 'gen7': format = 'A' + format.slice(4); break;
-				default: format = 'B' + format; break;
+				default: format = 'X' + format; break;
 				}
 				folders.push(format);
 			}
@@ -260,6 +260,7 @@
 				case 'C': newGen = '5'; break;
 				case 'B': newGen = '6'; break;
 				case 'A': newGen = '7'; break;
+				case 'X': newGen = 'X'; break;
 				case 'Z': newGen = '/'; break;
 				}
 				if (gen !== newGen) {
@@ -269,6 +270,8 @@
 						formatFolderBuf = '';
 						buf += '<div class="foldersep"></div>';
 						buf += '<div class="folder"><h3>Folders</h3></div>';
+					} else if (gen === 'X') {
+						buf += '<div class="folder"><h3>???</h3></div>';
 					} else {
 						buf += '<div class="folder"><h3>Gen ' + gen + '</h3></div>';
 					}
@@ -287,12 +290,8 @@
 				}
 				var formatName = format.slice(1);
 				if (formatName === '~') formatName = '';
-				if (newGen === '6' && formatName) {
-					format = formatName;
-				} else {
-					format = 'gen' + newGen + formatName;
-				}
-				if (format === 'gen7') formatName = '(uncategorized)';
+				format = 'gen' + newGen + formatName;
+				if (format.length === 4) formatName = '(uncategorized)';
 				// folders are <div>s rather than <button>s because in theory it has
 				// less weird interactions with HTML5 drag-and-drop
 				buf += '<div class="folder' + (this.curFolder === format ? ' cur"><div class="folderhack3"><div class="folderhack1"></div><div class="folderhack2"></div>' : '">') + '<div class="selectFolder" data-value="' + format + '"><i class="fa ' + (this.curFolder === format ? 'fa-folder-open-o' : 'fa-folder-o') + '"></i>' + formatName + '</div></div>' + (this.curFolder === format ? '</div>' : '');
@@ -336,6 +335,8 @@
 					buf += '<h2><i class="fa fa-folder-open-o"></i> ' + filterFormat + '</h2>';
 				}
 			}
+
+			buf += '<div class="storage-warning"></div>';
 
 			var newButtonText = "New Team";
 			if (filterFolder) newButtonText = "New Team in folder";
@@ -418,6 +419,12 @@
 				buf += '<p><strong>Clearing your cookies (specifically, <code>localStorage</code>) will delete your teams.</strong></p>';
 				buf += '<button name="backup" class="button"><i class="fa fa-upload"></i> Backup/Restore all teams</button>';
 				buf += '<p>If you want to clear your cookies or <code>localStorage</code>, you can use the Backup/Restore feature to save your teams as text first.</p>';
+				var self = this;
+				if (navigator.storage && navigator.storage.persisted) {
+					navigator.storage.persisted().then(function (state) {
+						self.updatePersistence(state);
+					});
+				}
 			} else {
 				buf += '<button name="backup" class="button"><i class="fa fa-upload"></i> Restore teams from backup</button>';
 			}
@@ -430,6 +437,13 @@
 				$pane.scrollTop(this.teamScrollPos);
 				this.teamScrollPos = 0;
 			}
+		},
+		updatePersistence: function (state) {
+			if (state) {
+				this.$('.storage-warning').html('');
+				return;
+			}
+			this.$('.storage-warning').html('');
 		},
 		greeting: function (answer, button) {
 			var buf = '<p><strong>' + $(button).html() + '</p></strong>';
@@ -673,37 +687,15 @@
 			}
 			this.back();
 		},
-		"new": function () {
-			var format = this.curFolder;
-			var folder = '';
-			if (format && format.charAt(format.length - 1) === '/') {
-				folder = format.slice(0, -1);
-				format = '';
-			}
-			var newTeam = {
-				name: 'Untitled ' + (teams.length + 1),
-				format: format,
-				team: '',
-				folder: folder,
-				iconCache: ''
-			};
+		"new": function (atTop) {
+			var newTeam = this.createTeam();
+
 			teams.push(newTeam);
 			this.edit(teams.length - 1);
 		},
 		newTop: function () {
-			var format = this.curFolder;
-			var folder = '';
-			if (format && format.charAt(format.length - 1) === '/') {
-				folder = format.slice(0, -1);
-				format = '';
-			}
-			var newTeam = {
-				name: 'Untitled ' + (teams.length + 1),
-				format: format,
-				team: '',
-				folder: folder,
-				iconCache: ''
-			};
+			var newTeam = this.createTeam();
+
 			teams.unshift(newTeam);
 			for (var room in app.rooms) {
 				var selection = app.rooms[room].$('button.teamselect').val();
@@ -712,6 +704,31 @@
 				obj.curTeamIndex++;
 			}
 			this.edit(0);
+		},
+		createTeam: function () {
+			var format = this.curFolder || 'gen7';
+			var folder = '';
+			if (format && format.charAt(format.length - 1) === '/') {
+				folder = format.slice(0, -1);
+				format = 'gen7';
+			}
+			var newTeam = {
+				name: 'Untitled ' + (teams.length + 1),
+				format: format,
+				team: '',
+				folder: folder,
+				iconCache: ''
+			};
+
+			// work around Opera 42-45 crashing when persist() is called
+			if (navigator.storage && navigator.storage.persist && !/ OPR\/4[0-5]/.test(navigator.userAgent)) {
+				var self = this;
+				navigator.storage.persist().then(function (state) {
+					self.updatePersistence(state);
+				});
+			}
+
+			return newTeam;
 		},
 		"import": function () {
 			if (this.exportMode) return this.back();
@@ -831,7 +848,9 @@
 				this.updateTeamList();
 			} else {
 				if (format.slice(-1) === '/') {
-					team.folder = format.slice(0, -1);
+					format = format.slice(0, -1);
+					if (format && format.slice(0, 3) !== 'gen') format = 'gen6' + format;
+					team.folder = format;
 					edited = true;
 				}
 				this.updateTeamList();
@@ -972,6 +991,7 @@
 					var bracketIndex = name.indexOf(']');
 					if (bracketIndex >= 0) {
 						format = name.substr(1, bracketIndex - 1);
+						if (format && format.slice(0, 3) !== 'gen') format = 'gen6' + format;
 						name = $.trim(name.substr(bracketIndex + 1));
 					}
 					Storage.teams.push({
@@ -1010,9 +1030,14 @@
 					this.curSetList.splice(this.curSetList.length - 1, 1);
 				}
 
+				var isGenericFormat = function (formatName) {
+					if (!formatName) return true;
+					if (/^gen\d+$/.test(formatName)) return true;
+					return false;
+				};
 				if (exports.BattleFormats) {
 					buf += '<li class="format-select">';
-					buf += '<label class="label">Format:</label><button class="select formatselect teambuilderformatselect" name="format" value="' + this.curTeam.format + '">' + (Tools.escapeFormat(this.curTeam.format) || '<em>Select a format</em>') + '</button>';
+					buf += '<label class="label">Format:</label><button class="select formatselect teambuilderformatselect" name="format" value="' + this.curTeam.format + '">' + (isGenericFormat(this.curTeam.format) ? '<em>Select a format</em>' : Tools.escapeFormat(this.curTeam.format)) + '</button>';
 					var btnClass = 'button' + (!this.curSetList.length ? ' disabled' : '');
 					buf += ' <button name="validate" class="' + btnClass + '"><i class="fa fa-check"></i> Validate</button></li>';
 				}
@@ -1083,8 +1108,11 @@
 				buf += '<span class="detailcell"><label>Happiness</label>' + (typeof set.happiness === 'number' ? set.happiness : 255) + '</span>';
 				buf += '<span class="detailcell"><label>Shiny</label>' + (set.shiny ? 'Yes' : 'No') + '</span>';
 			}
+			buf += '</button></div></div>';
 
-			buf += '</button>';
+			// item/type icons
+			buf += '<div class="setrow setrow-icons">';
+			buf += '<div class="setcell">';
 			var itemicon = '<span class="itemicon"></span>';
 			if (set.item) {
 				var item = Tools.getItem(set.item);
@@ -1092,7 +1120,16 @@
 			}
 			buf += itemicon;
 			buf += '</div>';
-			buf += '</div><div class="setrow">';
+			buf += '<div class="setcell setcell-typeicons">';
+			var types = template.types;
+			var table = (this.curTeam.gen < 7 ? BattleTeambuilderTable['gen' + this.curTeam.gen] : null);
+			if (table && template.id in table.overrideType) types = table.overrideType[template.id].split('/');
+			if (types) {
+				for (var i = 0; i < types.length; i++) buf += Tools.getTypeIcon(types[i]);
+			}
+			buf += '</div></div>';
+
+			buf += '<div class="setrow">';
 			if (this.curTeam.gen > 1) buf += '<div class="setcell setcell-item"><label>Item</label><input type="text" name="item" class="textbox chartinput" value="' + Tools.escapeHTML(set.item) + '" /></div>';
 			if (this.curTeam.gen > 2) buf += '<div class="setcell setcell-ability"><label>Ability</label><input type="text" name="ability" class="textbox chartinput" value="' + Tools.escapeHTML(set.ability) + '" /></div>';
 			buf += '</div></div>';
@@ -1182,14 +1219,14 @@
 			}
 		},
 		validate: function () {
-			var format = this.curTeam.format || 'anythinggoes';
+			var format = this.curTeam.format || 'gen7pokebankanythinggoes';
 
 			if (!this.curSetList.length) {
 				app.addPopupMessage("You need at least one Pokémon to validate.");
 				return;
 			}
 
-			if (window.BattleFormats && BattleFormats[format] && BattleFormats[format].hasBattleFormat) {
+			if (window.BattleFormats && BattleFormats[format] && BattleFormats[format].battleFormat) {
 				format = BattleFormats[format].battleFormat;
 			}
 			app.sendTeam(this.curTeam);
@@ -1492,7 +1529,7 @@
 				var set = this.curSetList[i];
 				var pokemonicon = '<span class="picon pokemonicon-' + i + '" style="' + Tools.getPokemonIcon(set) + '"></span>';
 				if (!set.species) {
-					buf += '<button disabled="disabled" class="addpokemon"><i class="fa fa-plus"></i></button> ';
+					buf += '<button disabled="disabled" class="addpokemon" aria-label="Add Pok&eacute;mon"><i class="fa fa-plus"></i></button> ';
 					isAdd = true;
 				} else if (i == this.curSetLoc) {
 					buf += '<button disabled="disabled" class="pokemon">' + pokemonicon + Tools.escapeHTML(set.name || Tools.getTemplate(set.species).baseSpecies || '<i class="fa fa-plus"></i>') + '</button> ';
@@ -1687,11 +1724,21 @@
 
 			if (template.speciesid === 'meowstic') {
 				smogdexid = 'meowstic-m';
-			} else if (smogdexid === 'rotom' || smogdexid === 'deoxys' || smogdexid === 'kyurem' || smogdexid === 'giratina' || smogdexid === 'shaymin' || smogdexid === 'tornadus' || smogdexid === 'thundurus' || smogdexid === 'landorus' || smogdexid === 'pumpkaboo' || smogdexid === 'gourgeist' || smogdexid === 'arceus' || smogdexid === 'meowstic' || smogdexid === 'hoopa') {
-				if (template.forme) smogdexid += '-' + toId(template.forme);
+			} else if (template.forme) {
+				switch (template.baseSpecies) {
+				case 'Vivillon':
+				case 'Keldeo':
+				case 'Basculin':
+				case 'Pikachu':
+				case 'Castform':
+					break;
+				default:
+					smogdexid += '-' + toId(template.forme);
+					break;
+				}
 			}
 
-			var generationNumber = 6;
+			var generationNumber = 7;
 			if (format.substr(0, 3) === 'gen') {
 				var number = format.charAt(3);
 				if ('1' <= number && number <= '5') {
@@ -1699,7 +1746,7 @@
 					format = format.substr(4);
 				}
 			}
-			var generation = ['rb', 'gs', 'rs', 'dp', 'bw', 'xy'][generationNumber - 1];
+			var generation = ['rb', 'gs', 'rs', 'dp', 'bw', 'xy', 'sm'][generationNumber - 1];
 			if (format === 'battlespotdoubles') {
 				smogdexid += '/vgc15';
 			} else if (format === 'doublesou' || format === 'doublesuu') {
@@ -1712,7 +1759,7 @@
 		getBaseStats: function (template) {
 			var baseStats = template.baseStats;
 			var gen = this.curTeam.gen;
-			if (gen < 6) {
+			if (gen < 7) {
 				var overrideStats = BattleTeambuilderTable['gen' + gen].overrideStats[template.id];
 				if (overrideStats || gen === 1) {
 					baseStats = {
@@ -1879,7 +1926,7 @@
 						}
 					}
 				}
-				if (hpType && this.curTeam.gen <= 6) {
+				if (hpType && !this.canHyperTrain(set)) {
 					var hpIVs;
 					switch (hpType) {
 					case 'dark':
@@ -2094,7 +2141,7 @@
 
 				if (set.evs[stat] !== val || natureChange) {
 					set.evs[stat] = val;
-					if (this.curTeam.gen <= 2) {
+					if (this.ignoreEVLimits) {
 						if (set.evs['hp'] === undefined) set.evs['hp'] = 252;
 						if (set.evs['atk'] === undefined) set.evs['atk'] = 252;
 						if (set.evs['def'] === undefined) set.evs['def'] = 252;
@@ -2128,7 +2175,7 @@
 		},
 		updateIVs: function () {
 			var set = this.curSet;
-			if (!set.moves || this.curTeam.gen > 6) return;
+			if (!set.moves || this.canHyperTrain(set)) return;
 			var hasHiddenPower = false;
 			for (var i = 0; i < set.moves.length; i++) {
 				if (toId(set.moves[i]).slice(0, 11) === 'hiddenpower') {
@@ -2140,11 +2187,18 @@
 			var hpTypes = ['Fighting', 'Flying', 'Poison', 'Ground', 'Rock', 'Bug', 'Ghost', 'Steel', 'Fire', 'Water', 'Grass', 'Electric', 'Psychic', 'Ice', 'Dragon', 'Dark'];
 			var hpType;
 			if (this.curTeam.gen <= 2) {
+				var hpDV = Math.floor(set.ivs.hp / 2);
 				var atkDV = Math.floor(set.ivs.atk / 2);
 				var defDV = Math.floor(set.ivs.def / 2);
 				var speDV = Math.floor(set.ivs.spe / 2);
 				var spcDV = Math.floor(set.ivs.spa / 2);
 				hpType = hpTypes[4 * (atkDV % 4) + (defDV % 4)];
+				var expectedHpDV = (atkDV % 2) * 8 + (defDV % 2) * 4 + (speDV % 2) * 2 + (spcDV % 2);
+				if (expectedHpDV !== hpDV) {
+					set.ivs.hp = expectedHpDV * 2;
+					if (set.ivs.hp === 30) set.ivs.hp = 31;
+					this.$chart.find('input[name=iv-hp]').val(expectedHpDV);
+				}
 			} else {
 				var hpTypeX = 0;
 				var i = 1;
@@ -2193,7 +2247,7 @@
 			if (val !== originalVal) slider.o.pointers[0].set(val);
 
 			if (!set.evs) set.evs = {};
-			if (this.curTeam.gen <= 2) {
+			if (this.ignoreEVLimits) {
 				if (set.evs['hp'] === undefined) set.evs['hp'] = 252;
 				if (set.evs['atk'] === undefined) set.evs['atk'] = 252;
 				if (set.evs['def'] === undefined) set.evs['def'] = 252;
@@ -2270,13 +2324,13 @@
 
 			if (this.curTeam.gen > 1) {
 				buf += '<div class="formrow"><label class="formlabel">Gender:</label><div>';
-				if (template.gender && this.curTeam.format !== 'balancedhackmons') {
+				if (template.gender && this.curTeam.format.indexOf('hackmons') < 0) {
 					var genderTable = {'M': "Male", 'F': "Female", 'N': "Genderless"};
 					buf += genderTable[template.gender];
 				} else {
 					buf += '<label><input type="radio" name="gender" value="M"' + (set.gender === 'M' ? ' checked' : '') + ' /> Male</label> ';
 					buf += '<label><input type="radio" name="gender" value="F"' + (set.gender === 'F' ? ' checked' : '') + ' /> Female</label> ';
-					if (this.curTeam.format !== 'balancedhackmons') {
+					if (this.curTeam.format.indexOf('hackmons') < 0) {
 						buf += '<label><input type="radio" name="gender" value="N"' + (!set.gender ? ' checked' : '') + ' /> Random</label>';
 					} else {
 						buf += '<label><input type="radio" name="gender" value="N"' + (set.gender === 'N' ? ' checked' : '') + ' /> Genderless</label>';
@@ -2310,6 +2364,7 @@
 
 			// happiness
 			var happiness = parseInt(this.$chart.find('input[name=happiness]').val(), 10);
+			if (isNaN(happiness)) happiness = 255;
 			if (happiness > 255) happiness = 255;
 			if (happiness < 0) happiness = 255;
 			set.happiness = happiness;
@@ -2614,7 +2669,7 @@
 		},
 		unChooseMove: function (moveName) {
 			var set = this.curSet;
-			if (!moveName || !set || this.curTeam.format === 'hiddentype') return;
+			if (!moveName || !set || this.curTeam.format === 'gen7hiddentype') return;
 			if (moveName.substr(0, 13) === 'Hidden Power ') {
 				if (set.ivs) {
 					for (var i in set.ivs) {
@@ -2624,10 +2679,20 @@
 				}
 			}
 			var resetSpeed = false;
-			if (moveName === 'Gyro Ball' || moveName === 'Trick Room') {
+			if (moveName === 'Gyro Ball') {
 				resetSpeed = true;
 			}
 			this.chooseMove('', resetSpeed);
+		},
+		canHyperTrain: function (set) {
+			if (this.curTeam.gen < 7) return false;
+			var format = this.curTeam.format;
+			if (!set.level || set.level === 100) return true;
+			if (format.substr(0, 3) === 'gen') format = format.substr(4);
+			if (format.substr(0, 10) === 'battlespot' || format.substr(0, 3) === 'vgc') {
+				if (set.level === 50) return true;
+			}
+			return false;
 		},
 		chooseMove: function (moveName, resetSpeed) {
 			var set = this.curSet;
@@ -2637,29 +2702,39 @@
 			var minSpe;
 			if (resetSpeed) minSpe = false;
 			if (moveName.substr(0, 13) === 'Hidden Power ') {
-				var hpType = moveName.substr(13);
+				if (!this.canHyperTrain(set)) {
+					var hpType = moveName.substr(13);
 
-				set.ivs = {};
-				if (this.curTeam.gen > 2) {
-					for (var i in exports.BattleTypeChart[hpType].HPivs) {
-						set.ivs[i] = exports.BattleTypeChart[hpType].HPivs[i];
-					}
-				} else {
-					for (var i in exports.BattleTypeChart[hpType].HPdvs) {
-						set.ivs[i] = exports.BattleTypeChart[hpType].HPdvs[i] * 2;
+					set.ivs = {hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31};
+					if (this.curTeam.gen > 2) {
+						for (var i in exports.BattleTypeChart[hpType].HPivs) {
+							set.ivs[i] = exports.BattleTypeChart[hpType].HPivs[i];
+						}
+					} else {
+						for (var i in exports.BattleTypeChart[hpType].HPdvs) {
+							set.ivs[i] = exports.BattleTypeChart[hpType].HPdvs[i] * 2;
+						}
+						var atkDV = Math.floor(set.ivs.atk / 2);
+						var defDV = Math.floor(set.ivs.def / 2);
+						var speDV = Math.floor(set.ivs.spe / 2);
+						var spcDV = Math.floor(set.ivs.spa / 2);
+						var expectedHpDV = (atkDV % 2) * 8 + (defDV % 2) * 4 + (speDV % 2) * 2 + (spcDV % 2);
+						set.ivs.hp = expectedHpDV * 2;
+						if (set.ivs.hp === 30) set.ivs.hp = 31;
 					}
 				}
 			} else if (moveName === 'Return') {
 				this.curSet.happiness = 255;
 			} else if (moveName === 'Frustration') {
 				this.curSet.happiness = 0;
-			} else if (moveName === 'Gyro Ball' || moveName === 'Trick Room') {
+			} else if (moveName === 'Gyro Ball') {
 				minSpe = true;
 			}
 
-			if (this.curTeam.format === 'hiddentype') return;
+			if (this.curTeam.format === 'gen7hiddentype') return;
 
 			var minAtk = true;
+			if (set.ability === 'Battle Bond') minAtk = false; // only available through an event with 31 Atk IVs
 			var hpModulo = (this.curTeam.gen >= 6 ? 2 : 4);
 			var hasHiddenPower = false;
 			var moves = set.moves;
@@ -2673,7 +2748,7 @@
 				} else if (move.id === 'metronome' || move.id === 'assist' || move.id === 'copycat' || move.id === 'mefirst') {
 					minAtk = false;
 				}
-				if (minSpe === false && (moveName === 'Gyro Ball' || moveName === 'Trick Room')) {
+				if (minSpe === false && moveName === 'Gyro Ball') {
 					minSpe = undefined;
 				}
 			}
@@ -2714,18 +2789,22 @@
 			if (set.level) delete set.level;
 			if (this.curTeam && this.curTeam.format) {
 				var baseFormat = this.curTeam.format;
+				var format = window.BattleFormats && window.BattleFormats[baseFormat];
 				if (baseFormat.substr(0, 3) === 'gen') baseFormat = baseFormat.substr(4);
 				if (baseFormat.substr(0, 8) === 'pokebank') baseFormat = baseFormat.substr(8);
 				if (this.curTeam && this.curTeam.format) {
 					if (baseFormat.substr(0, 10) === 'battlespot' || baseFormat.substr(0, 3) === 'vgc') set.level = 50;
-					if (baseFormat.substr(0, 2) === 'lc') set.level = 5;
+					if (baseFormat.substr(0, 2) === 'lc' || baseFormat.substr(0, 5) === 'caplc') set.level = 5;
+					if (format && format.teambuilderLevel) {
+						set.level = format.teambuilderLevel;
+					}
 				}
 			}
 			if (set.gender) delete set.gender;
 			if (template.gender && template.gender !== 'N') set.gender = template.gender;
 			if (set.happiness) delete set.happiness;
 			if (set.shiny) delete set.shiny;
-			if (this.curTeam.format !== 'balancedhackmons') {
+			if (this.curTeam.format.indexOf('hackmons') < 0) {
 				set.item = (template.requiredItem || '');
 			} else {
 				set.item = '';
@@ -2757,8 +2836,8 @@
 			var moveCount = {
 				'Physical': 0,
 				'Special': 0,
-				'PhysicalOffense': 0,
-				'SpecialOffense': 0,
+				'PhysicalAttack': 0,
+				'SpecialAttack': 0,
 				'PhysicalSetup': 0,
 				'SpecialSetup': 0,
 				'Support': 0,
@@ -2784,6 +2863,9 @@
 				if (move.category === 'Status') {
 					if (move.id === 'batonpass' || move.id === 'healingwish' || move.id === 'lunardance') {
 						moveCount['Support']++;
+					} else if (move.id === 'metronome' || move.id === 'assist' || move.id === 'copycat' || move.id === 'mefirst') {
+						moveCount['Physical'] += 0.5;
+						moveCount['Special'] += 0.5;
 					} else if (move.id === 'naturepower') {
 						moveCount['Special']++;
 					} else if (move.id === 'protect' || move.id === 'detect' || move.id === 'spikyshield' || move.id === 'kingsshield') {
@@ -2812,7 +2894,7 @@
 					}
 				} else if (move.id === 'counter' || move.id === 'endeavor' || move.id === 'metalburst' || move.id === 'mirrorcoat' || move.id === 'rapidspin') {
 					moveCount['Support']++;
-				} else if (move.id === 'nightshade' || move.id === 'seismictoss' || move.id === 'superfang' || move.id === 'foulplay' || move.id === 'endeavor' || move.id === 'finalgambit') {
+				} else if (move.id === 'nightshade' || move.id === 'seismictoss' || move.id === 'psywave' || move.id === 'superfang' || move.id === 'naturesmadness' || move.id === 'foulplay' || move.id === 'endeavor' || move.id === 'finalgambit') {
 					moveCount['Offense']++;
 				} else if (move.id === 'fellstinger') {
 					moveCount['PhysicalSetup']++;
@@ -3069,6 +3151,8 @@
 
 			if (this.curTeam && this.ignoreEVLimits) {
 				evs = {hp:252, atk:252, def:252, spa:252, spd:252, spe:252};
+				if (!moveCount['PhysicalAttack']) delete evs.atk;
+				if (!moveCount['SpecialAttack']) delete evs.spa;
 				if (hasMove['gyroball'] || hasMove['trickroom']) delete evs.spe;
 				if (this.curTeam.gen === 1) delete evs.spd;
 				if (this.curTeam.gen < 3) return evs;
@@ -3192,10 +3276,16 @@
 				minusStat = 'spe';
 			} else if (!moveCount['PhysicalAttack']) {
 				minusStat = 'atk';
-			} else if (moveCount['SpecialAttack'] < 1) {
-				minusStat = 'spa';
-			} else if (moveCount['PhysicalAttack'] < 1) {
+			} else if (moveCount['SpecialAttack'] < 1 && !evs['spa']) {
+				if (moveCount['SpecialAttack'] < moveCount['PhysicalAttack']) {
+					minusStat = 'spa';
+				} else if (!evs['atk']) {
+					minusStat = 'atk';
+				}
+			} else if (moveCount['PhysicalAttack'] < 1 && !evs['atk']) {
 				minusStat = 'atk';
+			} else if (stats.def > stats.spe && stats.spd > stats.spe && !evs['spe']) {
+				minusStat = 'spe';
 			} else if (stats.def > stats.spd) {
 				minusStat = 'spd';
 			} else {
@@ -3262,6 +3352,7 @@
 
 		getGen: function (format) {
 			format = '' + format;
+			if (!format) return 7;
 			if (format.substr(0, 3) !== 'gen') return 6;
 			return parseInt(format.substr(3, 1), 10) || 6;
 		},
@@ -3281,7 +3372,7 @@
 				if (i !== data.i && i !== data.i + 1) {
 					buf += '<li><button name="moveHere" value="' + i + '"><i class="fa fa-arrow-right"></i> Move here</button></li>';
 				}
-				buf += '<li' + (i === data.i ? ' style="opacity:.3"' : ' style="opacity:.6"') + '><span class="pokemonicon" style="display:inline-block;vertical-align:middle;' + Tools.getPokemonIcon(set) + '"></span> ' + Tools.escapeHTML(set.name) + '</li>';
+				buf += '<li' + (i === data.i ? ' style="opacity:.3"' : ' style="opacity:.6"') + '><span class="picon" style="display:inline-block;vertical-align:middle;' + Tools.getPokemonIcon(set) + '"></span> ' + Tools.escapeHTML(set.name || set.species) + '</li>';
 			}
 			if (i !== data.i && i !== data.i + 1) {
 				buf += '<li><button name="moveHere" value="' + i + '"><i class="fa fa-arrow-right"></i> Move here</button></li>';
@@ -3336,7 +3427,7 @@
 			var spriteSize = 96;
 			var spriteDim = 'width: 96px; height: 96px;';
 
-			var gen = {1:'rby', 2:'gsc', 3:'rse', 4:'dpp', 5:'bw', 6:'xy'}[Math.max(this.room.curTeam.gen, template.gen)];
+			var gen = {1:'rby', 2:'gsc', 3:'rse', 4:'dpp', 5:'bw', 6:'xy', 7:'xy'}[Math.max(this.room.curTeam.gen, template.gen)];
 			if (Tools.prefs('nopastgens')) gen = 'xy';
 			if (Tools.prefs('bwgfx') && gen === 'xy') gen = 'bw';
 			if (gen === 'xy') {

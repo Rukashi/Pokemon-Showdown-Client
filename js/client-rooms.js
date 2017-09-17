@@ -31,11 +31,11 @@
 		},
 		joinRoomPopup: function () {
 			app.addPopupPrompt("Room name:", "Join room", function (room) {
-				if (room.startsWith('http://')) room = room.slice(7);
-				if (room.startsWith('https://')) room = room.slice(8);
-				if (room.startsWith('play.pokemonshowdown.com/')) room = room.slice(25);
-				if (room.startsWith('psim.us/')) room = room.slice(8);
-				if (room.startsWith(document.location.hostname + '/')) room = room.slice(document.location.hostname.length + 1);
+				if (room.substr(0, 7) === 'http://') room = room.slice(7);
+				if (room.substr(0, 8) === 'https://') room = room.slice(8);
+				if (room.substr(0, 25) === 'play.pokemonshowdown.com/') room = room.slice(25);
+				if (room.substr(0, 8) === 'psim.us/') room = room.slice(8);
+				if (room.substr(0, document.location.hostname.length + 1) === document.location.hostname + '/') room = room.slice(document.location.hostname.length + 1);
 				room = toRoomid(room);
 				if (!room) return;
 				app.tryJoinRoom(room);
@@ -75,7 +75,8 @@
 				var rightSide = '<button class="button" name="roomlist" title="Watch an active battle"><strong>' + battleCount + '</strong> active ' + (battleCount == 1 ? 'battle' : 'battles') + '</button> <span style="' + Tools.getPokemonIcon('meloetta-pirouette') + '" class="picon icon-right" title="Meloetta is PS\'s mascot! The Pirouette forme is Fighting-type, and represents our battles."></span>';
 				this.$('.roomlisttop').html('<table class="roomcounters" border="0" cellspacing="0" cellpadding="0" width="100%"><tr><td>' + leftSide + '</td><td>' + rightSide + '</td></tr></table>');
 			}
-			this.$('.roomlist').first().html('<h2 class="rooms-officialchatrooms">Official chat rooms</h2>' + _.map(rooms.official, this.renderRoomBtn).join(""));
+			this.$('.roomlist').first().html('<h2 class="rooms-officialchatrooms">Official chat rooms</h2>' + _.map(rooms.official, this.renderRoomBtn).join("") +
+				(rooms.pspl && rooms.pspl.length ? '<a href="http://www.smogon.com/forums/threads/pokemon-showdown-premier-league-v-read-the-full-post.3605826/" target="_blank"><h2 class="rooms-psplchatrooms">PSPL Winner</h2></a>' + _.map(rooms.pspl, this.renderRoomBtn).join("") : ''));
 			this.$('.roomlist').last().html('<h2 class="rooms-chatrooms">Chat rooms</h2>' + _.map(rooms.chat.sort(this.compareRooms), this.renderRoomBtn).join(""));
 		},
 		roomlist: function () {
@@ -107,16 +108,20 @@
 		type: 'battles',
 		title: 'Battles',
 		isSideRoom: true,
+		events: {
+			'change input[name=elofilter]': 'refresh'
+		},
 		initialize: function () {
 			this.$el.addClass('ps-room-light').addClass('scrollable');
 			var buf = '<div class="pad"><button class="button" style="float:right;font-size:10pt;margin-top:3px" name="close"><i class="fa fa-times"></i> Close</button><div class="roomlist"><p><button class="button" name="refresh"><i class="fa fa-refresh"></i> Refresh</button> <span style="' + Tools.getPokemonIcon('meloetta-pirouette') + ';display:inline-block;vertical-align:middle" class="picon" title="Meloetta is PS\'s mascot! The Pirouette forme is Fighting-type, and represents our battles."></span></p>';
 
-			buf += '<p><label class="label">Format:</label><button class="select formatselect" name="selectFormat">(All formats)</button></p>';
+			buf += '<p><label class="label">Format:</label><button class="select formatselect" name="selectFormat">(All formats)</button></p> <label><input type="checkbox" name="elofilter" value="1300" /> Elo 1300+</label>';
 			buf += '<div class="list"><p>Loading...</p></div>';
 			buf += '</div></div>';
 
 			this.$el.html(buf);
 			this.$list = this.$('.list');
+			this.$refreshButton = this.$('button[name=refresh]');
 
 			this.format = '';
 			app.on('response:roomlist', this.update, this);
@@ -134,22 +139,21 @@
 		},
 		changeFormat: function (format) {
 			this.format = format;
-			app.send('/cmd roomlist ' + this.format);
+			this.data = null;
 			this.update();
+			this.refresh();
 		},
 		focus: function (e) {
 			if (e && $(e.target).closest('select, a').length) return;
 			if (new Date().getTime() - this.lastUpdate > 60 * 1000) {
-				app.send('/cmd roomlist');
-				this.lastUpdate = new Date().getTime();
+				this.refresh();
 			}
 			var prevPos = this.$el.scrollTop();
 			this.$('button[name=refresh]').focus();
 			this.$el.scrollTop(prevPos);
 		},
 		rejoin: function () {
-			app.send('/cmd roomlist');
-			this.lastUpdate = new Date().getTime();
+			this.refresh();
 		},
 		renderRoomBtn: function (id, roomData, matches) {
 			var format = (matches[1] || '');
@@ -194,11 +198,15 @@
 			if (!buf.length) return this.$list.html('<p>No ' + Tools.escapeFormat(this.format) + ' battles are going on right now.</p>');
 			return this.$list.html('<p>' + buf.length + (buf.length === 100 ? '+' : '') + ' ' + Tools.escapeFormat(this.format) + ' ' + (buf.length === 1 ? 'battle' : 'battles') + '</p>' + buf.join(""));
 		},
-		refresh: function (i, button) {
-			app.send('/cmd roomlist ' + this.format);
+		refresh: function () {
+			var elofilter = '';
+			var $checkbox = this.$('input[name=elofilter]');
+			if ($checkbox.is(':checked')) elofilter = ', ' + $checkbox.val();
+			app.send('/cmd roomlist ' + this.format + elofilter);
 
+			this.lastUpdate = new Date().getTime();
 			// Prevent further refreshes until we get a response.
-			button.disabled = true;
+			this.$refreshButton[0].disabled = true;
 		}
 	});
 

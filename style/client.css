@@ -15,10 +15,10 @@ body {
 
 	/* see http://pokemonshowdown.com/credits */
 	background: #344b6c url(../fx/client-bg-charizards.jpg) no-repeat left center fixed;
-  -webkit-background-size: cover;
-  -moz-background-size: cover;
-  -o-background-size: cover;
-  background-size: cover;
+	-webkit-background-size: cover;
+	-moz-background-size: cover;
+	-o-background-size: cover;
+	background-size: cover;
 }
 
 .pad {
@@ -86,6 +86,10 @@ button {
 }
 button:disabled {
 	cursor: default;
+}
+select {
+	font-size: 9pt;
+	font-family: Verdana, Helvetica, Arial, sans-serif;
 }
 
 .dark a {
@@ -178,7 +182,8 @@ button:disabled {
 }
 */
 .dark .button,
-.dark .tabbar a.button {
+.dark .tabbar a.button,
+.dark .popupmenu button.button {
 	background: #484848;
 	box-shadow: inset 0 3px 4px rgba(255, 255, 255, 0.25);
 	border-color: #A9A9A9;
@@ -189,6 +194,11 @@ button:disabled {
 .dark .tabbar a.button:hover {
 	background: #606060;
 	border-color: #EEEEEE;
+}
+.dark .popupmenu button.button:hover {
+	background: #606060;
+	border-color: #EEEEEE;
+	color: #F9F9F9;
 }
 .dark .tabbar a.button.notifying:hover {
 	background: #92C2D3;
@@ -207,6 +217,14 @@ button:disabled {
 	border-color: #A9A9A9;
 	box-shadow: none;
 	color: #F9F9F9;
+}
+.dark .button.disabled,
+.dark .button.disabled:hover,
+.dark .button.disabled:active {
+	background: #555555;
+	border-color: #555555;
+	box-shadow: none;
+	color: #999999;
 }
 /*
 .dark .closebutton,
@@ -758,6 +776,9 @@ p.or:after {
 }
 .teamselect:disabled strong {
 	color: #777777;
+}
+.dark .teamselect:disabled strong {
+	color: #505050;
 }
 .teamselect small {
 	margin: -1px 0 0 -3px;
@@ -1547,11 +1568,13 @@ a.ilink.yours {
 }
 
 .tournament-join,
-.tournament-leave {
+.tournament-leave,
+.tournament-validate {
 	display: none;
 }
 .tournament-join.active,
-.tournament-leave.active {
+.tournament-leave.active,
+.tournament-validate.active {
 	display: inline;
 }
 
@@ -2437,6 +2460,9 @@ a.ilink.yours {
 	opacity: .5;
 	cursor: default;
 }
+.teambar .picon {
+	display: block;
+}
 .teamchart,
 .teamchart li {
 	list-style-type: none;
@@ -2545,11 +2571,21 @@ a.ilink.yours {
 }
 .setcol-details .itemicon {
 	display: block;
-	margin-top: 10px;
 	width: 24px;
 	height: 24px;
 	background-image: transparent none no-repeat scroll center center;
 	opacity: 0.8;
+}
+.setrow-icons {
+	height: 24px;
+}
+.setcell-typeicons {
+	margin-top: 4px;
+	margin-right: 4px;
+	float:  right;
+}
+.setcell-typeicons img {
+	margin-left: 1px;
 }
 .setcell-sprite {
 	height: 82px;
@@ -2559,7 +2595,7 @@ a.ilink.yours {
 	margin-top: 0;
 }
 .setcell-details {
-	height: 84px;
+	height: 60px;
 }
 .setcol-moves .setcell {
 	padding-bottom: 1px;
@@ -3126,19 +3162,17 @@ a.ilink.yours {
 .effect-volume,
 .music-volume,
 .notif-volume {
-	height: 39px;
+	min-height: 34px;
 }
 .effect-volume label,
 .music-volume label,
 .notif-volume label {
-	padding-bottom: 12px;
 	font-size: 8pt;
 }
 .effect-volume em,
 .music-volume em,
 .notif-volume em {
 	display: block;
-	margin-top: -6px;
 	font-size: 9pt;
 	padding-left: 5px;
 	color: #555555;
@@ -3301,7 +3335,7 @@ a.ilink.yours {
 }
 
 .dark .highlighted {
-	background: rgba(255,200,0,0.18);
+	background: rgba(120,220,255,0.28);
 }
 .dark .revealed {
 	background: rgba(0,255,200,0.18);
@@ -3349,8 +3383,18 @@ a.ilink.yours {
 .dark .utilichart .movenamecol {
 	color: #DDD;
 }
+.dark .utilichart .cur .labelcol em,
+.dark .utilichart .cur .widelabelcol em,
+.dark .utilichart .cur .pplabelcol em,
+.dark .utilichart .cur .statcol em,
+.dark .utilichart .cur .bstcol em {
+	color: #FFF;
+}
 .dark .utilichart .col {
 	color: #999;
+}
+.dark .utilichart .cur .col {
+	color: #FFF;
 }
 .dark .setmenu button:hover,
 .dark .teamlist button:hover,
@@ -3369,7 +3413,8 @@ a.ilink.yours {
 	text-shadow: #5A6570 1px 1px 0,#5A6570 1px -1px 0,#5A6570 -1px 1px 0,#5A6570 -1px -1px 0;
 }
 .dark .setchart label,
-.dark .setchart-nickname label {
+.dark .setchart-nickname label,
+.dark .setchart .statrow-head em {
 	color: #BBB;
 }
 

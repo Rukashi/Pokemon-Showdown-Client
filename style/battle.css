@@ -314,7 +314,7 @@ License: GPLv2
 .trainer div {
 	width: 86px;
 	height: 90px;
-	opacity: .7;
+	opacity: .8;
 	margin: 0 auto;
 	background: transparent none no-repeat scroll center top;
 }
@@ -364,14 +364,14 @@ License: GPLv2
 	padding: 4px 6px 0 6px;
 	overflow: hidden;
 }
-.message strong {
+.messagebar strong {
 	color: #ffffff;
 	font-size: 12pt;
 }
-.message small {
+.messagebar small {
 	font-size: 8pt;
 }
-.message p {
+.messagebar p {
 	display: none;
 	margin: 0;
 	padding: 0;
@@ -384,6 +384,7 @@ License: GPLv2
 	right: 0;
 	bottom: 0;
 	text-shadow: #FFFFFF 1px 1px 0, #FFFFFF 1px -1px 0, #FFFFFF -1px 1px 0, #FFFFFF -1px -1px 0;
+	color: black;
 }
 .weather em {
 	display: block;
@@ -416,6 +417,22 @@ License: GPLv2
 .deltastreamweather {
 	background: #AAAAAA url(../fx/weather-strongwind.png) no-repeat scroll left top;
 	color: #666666;
+}
+.mistyterrainweather {
+	background: #EEAACC url(../fx/weather-mistyterrain.png) no-repeat scroll left top;
+	color: #551144;
+}
+.electricterrainweather {
+	background: #EEEEAA url(../fx/weather-electricterrain.png) no-repeat scroll left top;
+	color: #444411;
+}
+.grassyterrainweather {
+	background: #CCEEAA url(../fx/weather-grassyterrain.png) no-repeat scroll left top;
+	color: #335511;
+}
+.psychicterrainweather {
+	background: #CCAAEE url(../fx/weather-psychicterrain.png) no-repeat scroll left top;
+	color: #441155;
 }
 .pseudoweather {
 	background: #DDAAEE url(../fx/weather-trickroom.png) no-repeat scroll left top;
@@ -630,8 +647,9 @@ License: GPLv2
 	background: #333333;
 	color: #CCCCCC;
 }
-.dark .battle-log .chat strong,
-.dark .battle-log .chat em {
+.dark .battle-log .chat > strong, /* username, changed rating */
+.dark .battle-log .chat > em, /* user's chat message */
+.dark .battle-log .chat > q {
 	color: #8097BA;
 }
 .dark .battle-log h2 {
@@ -663,23 +681,22 @@ License: GPLv2
 }
 
 .itemicon {
-	display: block;
+	display: inline-block;
 	width: 24px;
 	height: 24px;
-	image-rendering: pixelated;
-}
-.pokemonicon {
-	display: block;
-	width: 40px;
-	height: 30px;
-	margin: 0 -4px;
-	image-rendering: pixelated;
 }
 .picon {
-	display: block;
+	display: inline-block;
 	width: 40px;
 	height: 30px;
+}
+.trainer .picon {
+	margin: 0 -4px;
+}
+.pixelated, .itemicon, .picon {
+	image-rendering: -moz-crisp-edges;
 	image-rendering: pixelated;
+	-ms-interpolation-mode: nearest-neighbor;
 }
 
 /*********************************************************
@@ -706,13 +723,18 @@ License: GPLv2
 	padding-left: 8px;
 	padding-right: 8px;
 }
-.battle-log .chat strong {
+.battle-log .chat > strong { /* username, changed rating */
 	color: #40576A;
 }
-.battle-log .chat em {
+.battle-log .chat > em,
+.battle-log .chat > q { /* user's chat message */
 	padding: 1px 4px 1px 3px;
 	color: #000000;
 	font-style: normal;
+}
+.battle-log .chat > q:before,
+.battle-log .chat > q:after {
+	content: '';
 }
 .chat.mine {
 	background: rgba(0,0,0,0.05);
@@ -896,7 +918,7 @@ License: GPLv2
 }
 a.subtle {
 	text-decoration: none;
-	color: black;
+	color: inherit;
 }
 a.subtle:hover {
 	text-decoration: underline;

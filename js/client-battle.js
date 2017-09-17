@@ -9,7 +9,9 @@
 		initialize: function (data) {
 			this.me = {};
 
-			this.$el.addClass('ps-room-opaque').html('<div class="battle">Battle is here</div><div class="foehint"></div><div class="battle-log"></div><div class="battle-log-add">Connecting...</div><div class="battle-controls"></div><button class="battle-chat-toggle button" name="showChat"><i class="fa fa-caret-left"></i> Chat</button>');
+			this.isSideRoom = Tools.prefs('rightpanelbattles');
+
+			this.$el.addClass('ps-room-opaque').html('<div class="battle">Battle is here</div><div class="foehint"></div><div class="battle-log" aria-label="Battle Log" role="complementary"></div><div class="battle-log-add">Connecting...</div><div class="battle-controls" role="complementary" aria-label="Battle Controls"></div><button class="battle-chat-toggle button" name="showChat"><i class="fa fa-caret-left"></i> Chat</button>');
 
 			this.$battle = this.$el.find('.battle');
 			this.$controls = this.$el.find('.battle-controls');
@@ -124,23 +126,37 @@
 				return this.init(data);
 			}
 			if (data.substr(0, 9) === '|request|') {
-				var choiceData = {offset: 0};
-				var requestData = null;
 				data = data.slice(9);
-				if (!isNaN(data.charAt(0)) && data.charAt(1) === '|') {
-					var nlIndex = data.indexOf('\n');
-					if (nlIndex >= 0) {
-						choiceData.offset = +data.charAt(0);
-						try {
-							$.extend(choiceData, $.parseJSON(data.slice(2, nlIndex)));
-						} catch (err) {}
-						data = data.slice(nlIndex + 1);
+
+				var requestData = null;
+				var choiceText = null;
+
+				var nlIndex = data.indexOf('\n');
+				if (/[0-9]/.test(data.charAt(0)) && data.charAt(1) === '|') {
+					// message format:
+					//   |request|CHOICEINDEX|CHOICEDATA
+					//   REQUEST
+
+					// This is backwards compatibility with old code that violates the
+					// expectation that server messages can be streamed line-by-line.
+					// Please do NOT EVER push protocol changes without a pull request.
+					// https://github.com/Zarel/Pokemon-Showdown/commit/e3c6cbe4b91740f3edc8c31a1158b506f5786d72#commitcomment-21278523
+					choiceText = '?';
+					data = data.slice(2, nlIndex);
+				} else if (nlIndex >= 0) {
+					// message format:
+					//   |request|REQUEST
+					//   |sentchoice|CHOICE
+					if (data.slice(nlIndex + 1, nlIndex + 13) === '|sentchoice|') {
+						choiceText = data.slice(nlIndex + 13);
 					}
+					data = data.slice(0, nlIndex);
 				}
+
 				try {
 					requestData = $.parseJSON(data);
 				} catch (err) {}
-				return this.receiveRequest(requestData, choiceData);
+				return this.receiveRequest(requestData, choiceText);
 			}
 
 			var log = data.split('\n');
@@ -202,6 +218,15 @@
 				$button.html('<small>(Hide ' + ($messages.length) + ' line' + ($messages.length > 1 ? 's' : '') + ' from ' + user + ')</small>');
 				$button.parent().removeClass('revealed');
 				$messages.show();
+			}
+		},
+		setHardcoreMode: function (mode) {
+			this.battle.setHardcoreMode(mode);
+			var id = '#' + this.el.id + ' ';
+			this.$('.hcmode-style').remove();
+			if (mode) this.$el.prepend('<style class="hcmode-style">' + id + '.battle .turn,' + id + '.battle-history{display:none !important;}</style>');
+			if (this.choice && this.choice.waiting) {
+				this.updateControlsForPlayer();
 			}
 		},
 
@@ -303,12 +328,6 @@
 				if (!this.finalDecision) this.finalDecision = !!this.request.noCancel;
 			}
 
-			var choiceOffset = this.choiceData.offset && this.choiceData.offset <= 3 ? this.choiceData.offset : 0;
-			var preDecided = _.map(getString(this.choiceData.done).split(''), Number);
-			var preSwitchFlags = _.map(getString(this.choiceData.enter).split(''), Number);
-			var preSwitchOutFlags = _.map(getString(this.choiceData.leave).split(''), Number);
-			var preTeamOrder = _.map(getString(this.choiceData.team).split(''), Number);
-
 			if (this.choice && this.choice.waiting) {
 				act = '';
 			}
@@ -319,51 +338,41 @@
 			// !this.choice = nothing has been chosen
 			// this.choice.choices = array of choice strings
 			// this.choice.switchFlags = dict of pokemon indexes that have a switch pending
+			// this.choice.switchOutFlags = ???
+			// this.choice.freedomDegrees = in a switch request: number of Pokemon that can't switch
+			// this.choice.type = determines what the current choice screen to be displayed is
+			// this.choice.waiting = true if the choice has been sent and we're just waiting for the next turn
 
 			switch (act) {
 			case 'move':
 				if (!this.choice) {
 					this.choice = {
-						preDecided: preDecided,
-						choices: new Array(choiceOffset),
+						choices: [],
 						switchFlags: {},
 						switchOutFlags: {}
 					};
-					for (var i = 0; i < preSwitchFlags.length; i++) this.choice.switchFlags[preSwitchFlags[i]] = 1;
-					for (var i = 0; i < preSwitchOutFlags.length; i++) this.choice.switchOutFlags[preSwitchOutFlags[i]] = 1;
 				}
-				if (choiceOffset < this.battle.mySide.active.length) {
-					this.updateMoveControls(type);
-				} else {
-					this.updateWaitControls();
-				}
+				this.updateMoveControls(type);
 				break;
 
 			case 'switch':
 				if (!this.choice) {
 					this.choice = {
-						preDecided: preDecided,
-						choices: new Array(choiceOffset),
+						choices: [],
 						switchFlags: {},
 						switchOutFlags: {},
-						freedomDegrees: 0, // Fancy term for the amount of Pokémon that won't be able to switch out.
+						freedomDegrees: 0,
 						canSwitch: 0
 					};
-					for (var i = 0; i < preSwitchFlags.length; i++) this.choice.switchFlags[preSwitchFlags[i]] = 1;
-					for (var i = 0; i < preSwitchOutFlags.length; i++) this.choice.switchOutFlags[preSwitchOutFlags[i]] = 1;
 
 					if (this.request.forceSwitch !== true) {
-						var faintedLength = _.filter(this.request.forceSwitch.slice(choiceOffset), function (fainted) {return fainted;}).length;
-						var freedomDegrees = faintedLength - _.filter(switchables.slice(this.battle.mySide.active.length), function (mon) {return !mon.zerohp;}).length;
+						var faintedLength = _.filter(this.request.forceSwitch, function (fainted) {return fainted;}).length;
+						var freedomDegrees = faintedLength - _.filter(switchables.slice(this.battle.mySide.active.length), function (mon) {return !mon.fainted;}).length;
 						this.choice.freedomDegrees = Math.max(freedomDegrees, 0);
 						this.choice.canSwitch = faintedLength - this.choice.freedomDegrees;
 					}
 				}
-				if (choiceOffset < this.battle.mySide.active.length) {
-					this.updateSwitchControls(type);
-				} else {
-					this.updateWaitControls();
-				}
+				this.updateSwitchControls(type);
 				break;
 
 			case 'team':
@@ -374,10 +383,8 @@
 				}
 				if (!this.choice) {
 					this.choice = {
-						preDecided: preDecided,
 						choices: null,
-						preTeamOrder: preTeamOrder,
-						teamPreview: [1, 2, 3, 4, 5, 6].slice(0, switchables.length),
+						teamPreview: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24].slice(0, switchables.length),
 						done: 0,
 						count: 1
 					};
@@ -401,11 +408,7 @@
 					}
 					this.choice.choices = new Array(this.choice.count);
 				}
-				if (choiceOffset < this.choice.count) {
-					this.updateTeamControls(type);
-				} else {
-					this.updateWaitControls(type);
-				}
+				this.updateTeamControls(type);
 				break;
 
 			default:
@@ -435,6 +438,7 @@
 				}, 1000);
 			} else if (this.battle.kickingInactive > 1) {
 				this.battle.kickingInactive--;
+				if (this.battle.totalTimeLeft) this.battle.totalTimeLeft--;
 			}
 
 			if (this.battle.kickingInactive) {
@@ -446,6 +450,13 @@
 					var minutesLeft = Math.floor(secondsLeft / 60);
 					secondsLeft -= minutesLeft * 60;
 					time = '' + minutesLeft + ':' + (secondsLeft < 10 ? '0' : '') + secondsLeft;
+
+					secondsLeft = this.battle.totalTimeLeft;
+					if (secondsLeft) {
+						minutesLeft = Math.floor(secondsLeft / 60);
+						secondsLeft -= minutesLeft * 60;
+						time += ' | ' + minutesLeft + ':' + (secondsLeft < 10 ? '0' : '') + secondsLeft + ' total';
+					}
 				} else {
 					time = '-:--';
 				}
@@ -469,12 +480,11 @@
 			app.addPopup(TimerPopup, {room: this});
 		},
 		updateMoveControls: function (type) {
-			var preDecided = this.choice.preDecided;
 			var switchables = this.request && this.request.side ? this.myPokemon : [];
 
 			if (type !== 'movetarget') {
-				while (preDecided.indexOf(this.choice.choices.length) >= 0 || switchables[this.choice.choices.length] && switchables[this.choice.choices.length].fainted && this.choice.choices.length + 1 < this.battle.mySide.active.length) {
-					this.choice.choices.push(preDecided.indexOf(this.choice.choices.length) >= 0 ? 'skip' : 'pass');
+				while (switchables[this.choice.choices.length] && switchables[this.choice.choices.length].fainted && this.choice.choices.length + 1 < this.battle.mySide.active.length) {
+					this.choice.choices.push('pass');
 				}
 			}
 
@@ -488,6 +498,11 @@
 			var trapped = curActive.trapped;
 			var canMegaEvo = curActive.canMegaEvo || switchables[pos].canMegaEvo;
 			var canZMove = curActive.canZMove || switchables[pos].canZMove;
+			if (canZMove && typeof canZMove[0] === 'string') {
+				canZMove = _.map(canZMove, function (move) {
+					return {move: move, target: Tools.getMove(move).target};
+				});
+			}
 
 			this.finalDecisionMove = curActive.maybeDisabled || false;
 			this.finalDecisionSwitch = curActive.maybeTrapped || false;
@@ -525,10 +540,10 @@
 
 					if (disabled) {
 						targetMenus[0] += '<button disabled="disabled"></button> ';
-					} else if (!pokemon || pokemon.zerohp) {
-						targetMenus[0] += '<button class="disabled" name="chooseMoveTarget" value="' + (i + 1) + '"><span class="picon" style="' + Tools.getPokemonIcon('missingno') + '"></span></button> ';
+					} else if (!pokemon || pokemon.fainted) {
+						targetMenus[0] += '<button name="chooseMoveTarget" value="' + (i + 1) + '"><span class="picon" style="' + Tools.getPokemonIcon('missingno') + '"></span></button> ';
 					} else {
-						targetMenus[0] += '<button name="chooseMoveTarget" value="' + (i + 1) + '"' + this.tooltips.tooltipAttrs("your" + i, 'pokemon', true) + '><span class="picon" style="' + Tools.getPokemonIcon(pokemon) + '"></span>' + Tools.escapeHTML(pokemon.name) + '<span class="hpbar' + pokemon.getHPColorClass() + '"><span style="width:' + (Math.round(pokemon.hp * 92 / pokemon.maxhp) || 1) + 'px"></span></span>' + (pokemon.status ? '<span class="status ' + pokemon.status + '"></span>' : '') + '</button> ';
+						targetMenus[0] += '<button name="chooseMoveTarget" value="' + (i + 1) + '"' + this.tooltips.tooltipAttrs("your" + i, 'pokemon', true) + '><span class="picon" style="' + Tools.getPokemonIcon(pokemon) + '"></span>' + (this.battle.ignoreOpponent || this.battle.ignoreNicks ? pokemon.species : Tools.escapeHTML(pokemon.name)) + '<span class="hpbar' + pokemon.getHPColorClass() + '"><span style="width:' + (Math.round(pokemon.hp * 92 / pokemon.maxhp) || 1) + 'px"></span></span>' + (pokemon.status ? '<span class="status ' + pokemon.status + '"></span>' : '') + '</button> ';
 					}
 				}
 				for (var i = 0; i < myActive.length; i++) {
@@ -544,8 +559,8 @@
 
 					if (disabled) {
 						targetMenus[1] += '<button disabled="disabled" style="visibility:hidden"></button> ';
-					} else if (!pokemon || pokemon.zerohp) {
-						targetMenus[1] += '<button class="disabled" name="chooseMoveTarget" value="' + (-(i + 1)) + '"><span class="picon" style="' + Tools.getPokemonIcon('missingno') + '"></span></button> ';
+					} else if (!pokemon || pokemon.fainted) {
+						targetMenus[1] += '<button name="chooseMoveTarget" value="' + (-(i + 1)) + '"><span class="picon" style="' + Tools.getPokemonIcon('missingno') + '"></span></button> ';
 					} else {
 						targetMenus[1] += '<button name="chooseMoveTarget" value="' + (-(i + 1)) + '"' + this.tooltips.tooltipAttrs(i, 'sidepokemon') + '><span class="picon" style="' + Tools.getPokemonIcon(pokemon) + '"></span>' + Tools.escapeHTML(pokemon.name) + '<span class="hpbar' + pokemon.getHPColorClass() + '"><span style="width:' + (Math.round(pokemon.hp * 92 / pokemon.maxhp) || 1) + 'px"></span></span>' + (pokemon.status ? '<span class="status ' + pokemon.status + '"></span>' : '') + '</button> ';
 					}
@@ -594,8 +609,8 @@
 							var move = Tools.getMove(moveData.move);
 							var moveType = this.tooltips.getMoveType(move, this.battle.mySide.active[pos] || this.myPokemon[pos]);
 							if (canZMove[i]) {
-								movebuttons += '<button class="type-' + moveType + '" name="chooseMove" value="' + (i + 1) + '" data-move="' + Tools.escapeHTML(canZMove[i]) + '" data-target="' + Tools.escapeHTML(moveData.target) + '"' + this.tooltips.tooltipAttrs(canZMove[i], 'move') + '>';
-								movebuttons += canZMove[i] + '<br /><small class="type">' + (moveType ? Tools.getType(moveType).name : "Unknown") + '</small> <small class="pp">1/1</small>&nbsp;</button> ';
+								movebuttons += '<button class="type-' + moveType + '" name="chooseMove" value="' + (i + 1) + '" data-move="' + Tools.escapeHTML(canZMove[i].move) + '" data-target="' + Tools.escapeHTML(canZMove[i].target) + '"' + this.tooltips.tooltipAttrs(moveData.move, 'zmove') + '>';
+								movebuttons += canZMove[i].move + '<br /><small class="type">' + (moveType ? Tools.getType(moveType).name : "Unknown") + '</small> <small class="pp">1/1</small>&nbsp;</button> ';
 							} else {
 								movebuttons += '<button disabled="disabled">&nbsp;</button>';
 							}
@@ -633,8 +648,8 @@
 					for (var i = 0; i < switchables.length; i++) {
 						var pokemon = switchables[i];
 						pokemon.name = pokemon.ident.substr(4);
-						if (pokemon.zerohp || i < this.battle.mySide.active.length || this.choice.switchFlags[i]) {
-							switchMenu += '<button class="disabled" name="chooseDisabled" value="' + Tools.escapeHTML(pokemon.name) + (pokemon.zerohp ? ',fainted' : i < this.battle.mySide.active.length ? ',active' : '') + '"' + this.tooltips.tooltipAttrs(i, 'sidepokemon') + '><span class="picon" style="' + Tools.getPokemonIcon(pokemon) + '"></span>' + Tools.escapeHTML(pokemon.name) + (!pokemon.zerohp ? '<span class="hpbar' + pokemon.getHPColorClass() + '"><span style="width:' + (Math.round(pokemon.hp * 92 / pokemon.maxhp) || 1) + 'px"></span></span>' + (pokemon.status ? '<span class="status ' + pokemon.status + '"></span>' : '') : '') + '</button> ';
+						if (pokemon.fainted || i < this.battle.mySide.active.length || this.choice.switchFlags[i]) {
+							switchMenu += '<button class="disabled" name="chooseDisabled" value="' + Tools.escapeHTML(pokemon.name) + (pokemon.fainted ? ',fainted' : i < this.battle.mySide.active.length ? ',active' : '') + '"' + this.tooltips.tooltipAttrs(i, 'sidepokemon') + '><span class="picon" style="' + Tools.getPokemonIcon(pokemon) + '"></span>' + Tools.escapeHTML(pokemon.name) + (pokemon.hp ? '<span class="hpbar' + pokemon.getHPColorClass() + '"><span style="width:' + (Math.round(pokemon.hp * 92 / pokemon.maxhp) || 1) + 'px"></span></span>' + (pokemon.status ? '<span class="status ' + pokemon.status + '"></span>' : '') : '') + '</button> ';
 						} else {
 							switchMenu += '<button name="chooseSwitch" value="' + i + '"' + this.tooltips.tooltipAttrs(i, 'sidepokemon') + '><span class="picon" style="' + Tools.getPokemonIcon(pokemon) + '"></span>' + Tools.escapeHTML(pokemon.name) + '<span class="hpbar' + pokemon.getHPColorClass() + '"><span style="width:' + (Math.round(pokemon.hp * 92 / pokemon.maxhp) || 1) + 'px"></span></span>' + (pokemon.status ? '<span class="status ' + pokemon.status + '"></span>' : '') + '</button> ';
 						}
@@ -659,12 +674,11 @@
 			}
 		},
 		updateSwitchControls: function (type) {
-			var preDecided = this.choice.preDecided;
 			var pos = this.choice.choices.length;
 
 			if (type !== 'switchposition' && this.request.forceSwitch !== true && !this.choice.freedomDegrees) {
-				while (preDecided.indexOf(pos) >= 0 || !this.request.forceSwitch[pos] && pos < 6) {
-					pos = this.choice.choices.push(preDecided.indexOf(pos) >= 0 ? 'skip' : 'pass');
+				while (!this.request.forceSwitch[pos] && pos < 6) {
+					pos = this.choice.choices.push('pass');
 				}
 			}
 
@@ -683,8 +697,8 @@
 				var controls = '<div class="switchmenu" style="display:block">';
 				for (var i = 0; i < myActive.length; i++) {
 					var pokemon = this.myPokemon[i];
-					if (pokemon && !pokemon.zerohp || this.choice.switchOutFlags[i]) {
-						controls += '<button disabled' + this.tooltips.tooltipAttrs(i, 'sidepokemon') + '><span class="picon" style="' + Tools.getPokemonIcon(pokemon) + '"></span>' + Tools.escapeHTML(pokemon.name) + (!pokemon.zerohp ? '<span class="hpbar' + pokemon.getHPColorClass() + '"><span style="width:' + (Math.round(pokemon.hp * 92 / pokemon.maxhp) || 1) + 'px"></span></span>' + (pokemon.status ? '<span class="status ' + pokemon.status + '"></span>' : '') : '') + '</button> ';
+					if (pokemon && !pokemon.fainted || this.choice.switchOutFlags[i]) {
+						controls += '<button disabled' + this.tooltips.tooltipAttrs(i, 'sidepokemon') + '><span class="picon" style="' + Tools.getPokemonIcon(pokemon) + '"></span>' + Tools.escapeHTML(pokemon.name) + (!pokemon.fainted ? '<span class="hpbar' + pokemon.getHPColorClass() + '"><span style="width:' + (Math.round(pokemon.hp * 92 / pokemon.maxhp) || 1) + 'px"></span></span>' + (pokemon.status ? '<span class="status ' + pokemon.status + '"></span>' : '') : '') + '</button> ';
 					} else if (!pokemon) {
 						controls += '<button disabled></button> ';
 					} else {
@@ -708,12 +722,12 @@
 				var switchMenu = '';
 				for (var i = 0; i < switchables.length; i++) {
 					var pokemon = switchables[i];
-					if (pokemon.zerohp || i < this.battle.mySide.active.length || this.choice.switchFlags[i]) {
-						switchMenu += '<button class="disabled" name="chooseDisabled" value="' + Tools.escapeHTML(pokemon.name) + (pokemon.zerohp ? ',fainted' : i < this.battle.mySide.active.length ? ',active' : '') + '"' + this.tooltips.tooltipAttrs(i, 'sidepokemon') + '>';
+					if (pokemon.fainted || i < this.battle.mySide.active.length || this.choice.switchFlags[i]) {
+						switchMenu += '<button class="disabled" name="chooseDisabled" value="' + Tools.escapeHTML(pokemon.name) + (pokemon.fainted ? ',fainted' : i < this.battle.mySide.active.length ? ',active' : '') + '"' + this.tooltips.tooltipAttrs(i, 'sidepokemon') + '>';
 					} else {
 						switchMenu += '<button name="chooseSwitch" value="' + i + '"' + this.tooltips.tooltipAttrs(i, 'sidepokemon') + '>';
 					}
-					switchMenu += '<span class="picon" style="' + Tools.getPokemonIcon(pokemon) + '"></span>' + Tools.escapeHTML(pokemon.name) + (!pokemon.zerohp ? '<span class="hpbar' + pokemon.getHPColorClass() + '"><span style="width:' + (Math.round(pokemon.hp * 92 / pokemon.maxhp) || 1) + 'px"></span></span>' + (pokemon.status ? '<span class="status ' + pokemon.status + '"></span>' : '') : '') + '</button> ';
+					switchMenu += '<span class="picon" style="' + Tools.getPokemonIcon(pokemon) + '"></span>' + Tools.escapeHTML(pokemon.name) + (!pokemon.fainted ? '<span class="hpbar' + pokemon.getHPColorClass() + '"><span style="width:' + (Math.round(pokemon.hp * 92 / pokemon.maxhp) || 1) + 'px"></span></span>' + (pokemon.status ? '<span class="status ' + pokemon.status + '"></span>' : '') : '') + '</button> ';
 				}
 
 				var controls = (
@@ -733,7 +747,7 @@
 		},
 		updateTeamControls: function (type) {
 			var switchables = this.request && this.request.side ? this.myPokemon : [];
-			var maxIndex = Math.min(switchables.length, 6);
+			var maxIndex = Math.min(switchables.length, 24);
 
 			var requestTitle = "";
 			if (this.choice.done) {
@@ -810,7 +824,7 @@
 								targetPos = parts[3];
 							}
 							if (targetPos === 'zmove') {
-								move = this.request.active[i].canZMove[parts[1] - 1];
+								move = this.request.active[i].canZMove[parts[1] - 1].move;
 								targetPos = parts[3];
 							}
 							if (targetPos) {
@@ -821,7 +835,11 @@
 									targetPos = -targetPos;
 									target += 'your ';
 								}
-								target += targetActive[targetPos - 1].species;
+								if (targetActive[targetPos - 1]) {
+									target += targetActive[targetPos - 1].species;
+								} else {
+									target = ''; // targeting an empty slot
+								}
 							}
 						}
 						buf += 'use ' + Tools.getMove(move).name + (target ? ' against ' + target : '') + '.<br />';
@@ -840,14 +858,20 @@
 				}
 			}
 			buf += '</small></p>';
-			if (!this.finalDecision) {
+			if (!this.finalDecision && !this.battle.hardcoreMode) {
 				buf += '<p><small><em>Waiting for opponent...</em></small> <button class="button" name="undoChoice">Cancel</button></p>';
 			}
 			return buf;
 		},
 
-		// Appends the rqid to the message so that the server can
-		// verify that the decision is sent in response to the correct request.
+		/**
+		 * Sends a decision; pass it an array of choices like ['move 1', 'switch 2']
+		 * and it'll send `/choose move 1,switch 2|3`
+		 * (where 3 is the rqid).
+		 *
+		 * (The rqid helps verify that the decision is sent in response to the
+		 * correct request.)
+		 */
 		sendDecision: function (message) {
 			if (!$.isArray(message)) return this.send('/' + message + '|' + this.request.rqid);
 			var buf = '/choose ';
@@ -857,7 +881,7 @@
 			this.send(buf.substr(0, buf.length - 1) + '|' + this.request.rqid);
 		},
 		request: null,
-		receiveRequest: function (request, choiceData) {
+		receiveRequest: function (request, choiceText) {
 			if (!request) {
 				this.side = '';
 				return;
@@ -872,8 +896,11 @@
 				request.requestType = 'wait';
 			}
 
-			this.choice = (choiceData && choiceData.offset ? {waiting: true} : null);
-			this.choiceData = choiceData;
+			var choice = null;
+			if (choiceText) {
+				choice = {waiting: true};
+			}
+			this.choice = choice;
 			this.finalDecision = this.finalDecisionMove = this.finalDecisionSwitch = false;
 			this.request = request;
 			if (request.side) {
@@ -934,7 +961,7 @@
 			this.send('/savereplay');
 		},
 		openBattleOptions: function () {
-			app.addPopup(BattleOptionsPopup, {battle: this.battle});
+			app.addPopup(BattleOptionsPopup, {battle: this.battle, room: this});
 		},
 		clickReplayDownloadButton: function (e) {
 			var filename = (this.battle.tier || 'Battle').replace(/[^A-Za-z0-9]/g, '');
@@ -1006,7 +1033,6 @@
 				var target = e.getAttribute('data-target');
 				var choosableTargets = {normal: 1, any: 1, adjacentAlly: 1, adjacentAllyOrSelf: 1, adjacentFoe: 1};
 				var spreadTargets = {allAdjacentFoes: 1, allAdjacent: 1};
-				if (isZMove && target in spreadTargets) target = 'normal';
 
 				this.choice.choices.push('move ' + pos + (isMega ? ' mega' : '') + (isZMove ? ' zmove' : ''));
 				if (myActive.length > 1 && target in choosableTargets) {
@@ -1116,14 +1142,12 @@
 			}
 		},
 		nextChoice: function () {
-			var preDecided = this.choice.preDecided;
 			var choices = this.choice.choices;
-			var preDecided = this.choice.preDecided;
 			var myActive = this.battle.mySide.active;
 
 			if (this.request.requestType === 'switch' && this.request.forceSwitch !== true) {
-				while (preDecided.indexOf(choices.length) >= 0 || choices.length < myActive.length && !this.request.forceSwitch[choices.length]) {
-					choices.push(preDecided.indexOf(choices.length) >= 0 ? 'skip' : 'pass');
+				while (choices.length < myActive.length && !this.request.forceSwitch[choices.length]) {
+					choices.push('pass');
 				}
 				if (choices.length < myActive.length) {
 					this.choice.type = 'switch2';
@@ -1131,8 +1155,8 @@
 					return true;
 				}
 			} else if (this.request.requestType === 'move') {
-				while (preDecided.indexOf(choices.length) >= 0 || choices.length < myActive.length && !myActive[choices.length]) {
-					choices.push(preDecided.indexOf(choices.length) >= 0 ? 'skip' : 'pass');
+				while (choices.length < myActive.length && !myActive[choices.length]) {
+					choices.push('pass');
 				}
 
 				if (choices.length < myActive.length) {
@@ -1147,7 +1171,11 @@
 		endTurn: function () {
 			var act = this.request && this.request.requestType;
 			if (act === 'team') {
-				this.sendDecision('team ' + this.choice.teamPreview.join(''));
+				if (this.choice.teamPreview.length >= 10) {
+					this.sendDecision('team ' + this.choice.teamPreview.join(','));
+				} else {
+					this.sendDecision('team ' + this.choice.teamPreview.join(''));
+				}
 			} else {
 				if (act === 'switch') {
 					// Assert that the remaining Pokémon won't switch, even though
@@ -1157,11 +1185,7 @@
 					}
 				}
 
-				if (this.partialDecisions) {
-					for (var i = 0; i < this.choice.choices.length; i++) {
-						this.sendDecision(this.choice.choices[i]);
-					}
-				} else if (this.choice.choices.length >= (this.choice.count || this.battle.mySide.active.length)) {
+				if (this.choice.choices.length >= (this.choice.count || this.battle.mySide.active.length)) {
 					this.sendDecision(this.choice.choices);
 				}
 
@@ -1187,7 +1211,6 @@
 		},
 		clearChoice: function () {
 			this.choice = null;
-			this.choiceData = {offset: 0};
 			this.updateControlsForPlayer();
 		},
 		leaveBattle: function () {
@@ -1241,23 +1264,37 @@
 	var BattleOptionsPopup = this.BattleOptionsPopup = Popup.extend({
 		initialize: function (data) {
 			this.battle = data.battle;
+			this.room = data.room;
+			var rightPanelBattlesPossible = (MainMenuRoom.prototype.bestWidth + BattleRoom.prototype.minWidth < $(window).width());
 			var buf = '<p><strong>In this battle</strong></p>';
-			buf += '<p><label class="optlabel"><input type="checkbox" name="ignorespects" /> Ignore Spectators</label></p>';
-			buf += '<p><label class="optlabel"><input type="checkbox" name="ignoreopp" /> Ignore Opponent</label></p>';
+			buf += '<p><label class="optlabel"><input type="checkbox" name="hardcoremode"' + (this.battle.hardcoreMode ? ' checked' : '') + '/> Hardcore mode (hide info not shown in-game) (beta)</label></p>';
+			buf += '<p><label class="optlabel"><input type="checkbox" name="ignorespects"' + (this.battle.ignoreSpects ? ' checked' : '') + '/> Ignore Spectators</label></p>';
+			buf += '<p><label class="optlabel"><input type="checkbox" name="ignoreopp"' + (this.battle.ignoreOpponent ? ' checked' : '') + '/> Ignore Opponent</label></p>';
 			buf += '<p><strong>All battles</strong></p>';
 			buf += '<p><label class="optlabel"><input type="checkbox" name="ignorenicks"' + (Tools.prefs('ignorenicks') ? ' checked' : '') + ' /> Ignore nicknames</label></p>';
+			if (rightPanelBattlesPossible) buf += '<p><label class="optlabel"><input type="checkbox" name="rightpanelbattles"' + (Tools.prefs('rightpanelbattles') ? ' checked' : '') + ' /> Open new battles on the right side</label></p>';
 			buf += '<p><button name="close">Close</button></p>';
 			this.$el.html(buf);
 		},
 		events: {
 			'change input[name=ignorespects]': 'toggleIgnoreSpects',
 			'change input[name=ignorenicks]': 'toggleIgnoreNicks',
-			'change input[name=ignoreopp]': 'toggleIgnoreOpponent'
+			'change input[name=ignoreopp]': 'toggleIgnoreOpponent',
+			'change input[name=hardcoremode]': 'toggleHardcoreMode',
+			'change input[name=rightpanelbattles]': 'toggleRightPanelBattles'
+		},
+		toggleHardcoreMode: function (e) {
+			this.room.setHardcoreMode(!!e.currentTarget.checked);
+			if (this.battle.hardcoreMode) {
+				this.battle.add('Hardcore mode ON: Information not available in-game is now hidden.');
+			} else {
+				this.battle.add('Hardcore mode OFF: Information not available in-game is now shown.');
+			}
 		},
 		toggleIgnoreSpects: function (e) {
 			this.battle.ignoreSpects = !!e.currentTarget.checked;
 			this.battle.add('Spectators ' + (this.battle.ignoreSpects ? '' : 'no longer ') + 'ignored.');
-			var $messages = $('.battle-log').find('.chat').not('small:contains(\u2605)');
+			var $messages = $('.battle-log').find('.chat').has('small').not(':contains(\u2605), :contains(\u2606)');
 			if (!$messages.length) return;
 			if (this.battle.ignoreSpects) {
 				$messages.hide();
@@ -1301,6 +1338,9 @@
 				side.updateStatbar(side.active[i], true, true);
 			}
 			side.updateSidebar();
+		},
+		toggleRightPanelBattles: function (e) {
+			Tools.prefs('rightpanelbattles', !!e.currentTarget.checked);
 		}
 	});
 

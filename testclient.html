@@ -48,7 +48,7 @@
 				<div class="activitymenu">
 					<div class="pmbox">
 						<div class="pm-window news-embed">
-							<h3><button class="closebutton" tabindex="-1"><i class="fa fa-times-circle"></i></button><button class="minimizebutton" tabindex="-1"><i class="fa fa-minus-circle"></i></button>Latest News</h3>
+							<h3><button class="closebutton" tabindex="-1" aria-label="Close"><i class="fa fa-times-circle"></i></button><button class="minimizebutton" tabindex="-1" aria-label="Minimize"><i class="fa fa-minus-circle"></i></button>Latest News</h3>
 							<div class="pm-log" style="max-height:none">
 								<div class="newsentry"><h4>Test client</h4><p>Welcome to the test client! You can test client changes here!</p><p>&mdash;<strong>Zarel</strong> <small class="date">on Sep 25, 2015</small></p></div>
 							</div>
@@ -77,7 +77,7 @@
 			soundManager.setup({url: 'swf/'});
 		</script>
 		<script src="js/lib/html-css-sanitizer-minified.js"></script>
-		<script src="js/lib/lodash.compat.js"></script>
+		<script src="js/lib/lodash.core.js"></script>
 		<script src="js/lib/backbone.js"></script>
 		<script src="js/lib/d3.v3.min.js"></script>
 
@@ -85,7 +85,7 @@
 			document.getElementById('loading-message').innerHTML += ' DONE<br />Loading data...';
 		</script>
 
-		<script src="https://play.pokemonshowdown.com/js/config.js"></script>
+		<script src="https://play.pokemonshowdown.com/config/config.js"></script>
 		<script src="js/battledata.js"></script>
 		<script src="data/pokedex-mini.js" onerror="loadRemoteData(this.src)"></script>
 		<script src="data/typechart.js" onerror="loadRemoteData(this.src)"></script>

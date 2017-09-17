@@ -133,8 +133,9 @@
 				this.$chatFrame.scrollTop(this.$chatFrame.scrollTop() - this.$chatFrame.height() + 60);
 			} else if (e.keyCode === 34) { // Pg Dn key
 				this.$chatFrame.scrollTop(this.$chatFrame.scrollTop() + this.$chatFrame.height() - 60);
-			} else if (e.keyCode === 9 && !e.shiftKey && !e.ctrlKey) { // Tab key
-				if (this.handleTabComplete(this.$chatbox)) {
+			} else if (e.keyCode === 9 && !e.ctrlKey) { // Tab key
+				var reverse = !!e.shiftKey; // Shift+Tab reverses direction
+				if (this.handleTabComplete(this.$chatbox, reverse)) {
 					e.preventDefault();
 					e.stopPropagation();
 				}
@@ -145,6 +146,11 @@
 				}
 			} else if (e.keyCode === 40 && !e.shiftKey && !e.altKey) { // Down key
 				if (this.chatHistoryDown(this.$chatbox, e)) {
+					e.preventDefault();
+					e.stopPropagation();
+				}
+			} else if (e.keyCode === 27 && !e.shiftKey && !e.altKey) { // Esc key
+				if (this.undoTabComplete(this.$chatbox)) {
 					e.preventDefault();
 					e.stopPropagation();
 				}
@@ -265,7 +271,7 @@
 		},
 		tabComplete: null,
 		userActivity: null,
-		handleTabComplete: function ($textbox) {
+		handleTabComplete: function ($textbox, reverse) {
 			// Don't tab complete at the start of the text box.
 			var idx = $textbox.prop('selectionStart');
 			if (idx === 0) return false;
@@ -273,21 +279,26 @@
 			var users = this.users || (app.rooms['lobby'] ? app.rooms['lobby'].users : {});
 
 			var text = $textbox.val();
+			var prefix = text.substr(0, idx);
 
-			if (this.tabComplete.cursor !== null && text.substr(0, idx) === this.tabComplete.cursor) {
+			if (this.tabComplete.cursor !== null && prefix === this.tabComplete.cursor) {
 				// The user is cycling through the candidate names.
-				if (++this.tabComplete.index >= this.tabComplete.candidates.length) {
-					this.tabComplete.index = 0;
+				if (reverse) {
+					this.tabComplete.index--;
+				} else {
+					this.tabComplete.index++;
 				}
+				if (this.tabComplete.index >= this.tabComplete.candidates.length) this.tabComplete.index = 0;
+				if (this.tabComplete.index < 0) this.tabComplete.index = this.tabComplete.candidates.length - 1;
 			} else {
 				// This is a new tab completion.
 
 				// There needs to be non-whitespace to the left of the cursor.
-				var m1 = /^(.*?)([A-Za-z0-9][^, ]*)$/.exec(text.substr(0, idx));
-				var m2 = /^(.*?)([A-Za-z0-9][^, ]* [^, ]*)$/.exec(text.substr(0, idx));
+				var m1 = /^([\s\S]*?)([A-Za-z0-9][^, \n]*)$/.exec(prefix);
+				var m2 = /^([\s\S]*?)([A-Za-z0-9][^, \n]* [^, ]*)$/.exec(prefix);
 				if (!m1 && !m2) return true;
 
-				this.tabComplete.prefix = text;
+				this.tabComplete.prefix = prefix;
 				var idprefix = (m1 ? toId(m1[2]) : '');
 				var spaceprefix = (m2 ? m2[2].replace(/[^A-Za-z0-9 ]+/g, '').toLowerCase() : '');
 				var candidates = []; // array of [candidate userid, prefix length]
@@ -344,6 +355,13 @@
 			this.tabComplete.cursor = fullPrefix;
 			return true;
 		},
+		undoTabComplete: function ($textbox) {
+			var cursorPosition = $textbox.prop('selectionEnd');
+			if (!this.tabComplete.cursor || $textbox.val().substr(0, cursorPosition) !== this.tabComplete.cursor) return false;
+			$textbox.val(this.tabComplete.prefix + $textbox.val().substr(cursorPosition));
+			$textbox.prop('selectionEnd', this.tabComplete.prefix.length);
+			return true;
+		},
 
 		// command parsing
 
@@ -351,7 +369,7 @@
 			var cmd = '';
 			var target = '';
 			var noSpace = false;
-			if (text.substr(0, 2) !== '//' && text.substr(0, 1) === '/') {
+			if (text.substr(0, 2) !== '//' && text.charAt(0) === '/') {
 				var spaceIndex = text.indexOf(' ');
 				if (spaceIndex > 0) {
 					cmd = text.substr(1, spaceIndex - 1);
@@ -366,7 +384,10 @@
 			switch (cmd.toLowerCase()) {
 			case 'chall':
 			case 'challenge':
-				var targets = target.split(',').map($.trim);
+				var targets = target.split(',');
+				for (var i = 0; i < targets.length; i++) {
+					targets[i] = $.trim(targets[i]);
+				}
 
 				var self = this;
 				var challenge = function (targets) {
@@ -465,6 +486,7 @@
 
 			case 'autojoin':
 			case 'cmd':
+			case 'crq':
 			case 'query':
 				this.add('This is a PS system command; do not use it.');
 				return false;
@@ -736,8 +758,14 @@
 				var targets = target.split(',');
 				var formatTargeting = false;
 				var formats = {};
+				var gens = {};
 				for (var i = 1, len = targets.length; i < len; i++) {
-					formats[toId(targets[i])] = 1;
+					targets[i] = $.trim(targets[i]);
+					if (targets[i].length === 4 && targets[i].substr(0, 3) === 'gen') {
+						gens[targets[i]] = 1;
+					} else {
+						formats[toId(targets[i])] = 1;
+					}
 					formatTargeting = true;
 				}
 
@@ -760,7 +788,7 @@
 						var row = data[i];
 						if (!row) return self.add('|raw|Error: corrupted ranking data');
 						var formatId = toId(row.formatid);
-						if (!formatTargeting || formats[formatId]) {
+						if (!formatTargeting || formats[formatId] || gens[formatId.slice(0, 4)] || (gens['gen6'] && formatId.substr(0, 3) !== 'gen')) {
 							buffer += '<tr>';
 						} else {
 							buffer += '<tr class="hidden">';
@@ -857,9 +885,12 @@
 
 			case 'avatar':
 				var parts = target.split(',');
-				var avatar = parseInt(parts[0], 10);
+				var avatarString = toId(parts[0]);
+				var avatar = parseInt(avatarString, 10);
 				if (avatar) {
 					Tools.prefs('avatar', avatar);
+				} else if (['bw2elesa', 'teamrocket', 'yellow', 'zinnia', 'clemont'].indexOf(avatarString) > -1) { // custom avatar exceptions
+					Tools.prefs('avatar', '#' + avatarString);
 				}
 				return text; // Send the /avatar command through to the server.
 
@@ -1031,7 +1062,7 @@
 		maxWidth: 1024,
 		isSideRoom: true,
 		initialize: function () {
-			var buf = '<div class="tournament-wrapper"></div><div class="chat-log"><div class="inner"></div></div></div><div class="chat-log-add">Connecting...</div><ul class="userlist"></ul>';
+			var buf = '<div class="tournament-wrapper"></div><div class="chat-log"><div class="inner" role="log"></div></div></div><div class="chat-log-add">Connecting...</div><ul class="userlist"></ul>';
 			this.$el.addClass('ps-room-light').html(buf);
 
 			this.$chatAdd = this.$('.chat-log-add');
@@ -1125,7 +1156,7 @@
 		addRow: function (line) {
 			var name, name2, room, action, silent, oldid;
 			if (line && typeof line === 'string') {
-				if (line.substr(0, 1) !== '|') line = '||' + line;
+				if (line.charAt(0) !== '|') line = '||' + line;
 				var row = line.substr(1).split('|');
 				switch (row[0]) {
 				case 'init':
@@ -1221,6 +1252,13 @@
 				case 'raw':
 				case 'html':
 					this.$chat.append('<div class="notice">' + Tools.sanitizeHTML(row.slice(1).join('|')) + '</div>');
+					break;
+
+				case 'notify':
+					if (!Tools.prefs('mute') && Tools.prefs('notifvolume')) {
+						soundManager.getSoundById('notif').setVolume(Tools.prefs('notifvolume')).play();
+					}
+					this.notifyOnce(row[1], row.slice(2).join('|'), 'highlight');
 					break;
 
 				case 'error':
@@ -1403,7 +1441,9 @@
 		addChat: function (name, message, pm, msgTime) {
 			var userid = toUserid(name);
 
-			if (app.ignore[userid] && (name.charAt(0) === ' ' || name.charAt(0) === '+')) return;
+			var speakerHasAuth = " +\u2606".indexOf(name.charAt(0)) < 0;
+			var readerHasAuth = this.users && " +\u2606".indexOf((this.users[app.user.get('userid')] || ' ').charAt(0)) < 0;
+			if (app.ignore[userid] && !speakerHasAuth && !readerHasAuth) return;
 
 			// Add this user to the list of people who have spoken recently.
 			this.markUserActive(userid);
@@ -1424,21 +1464,23 @@
 					'<span class="message-pm"><i class="pmnote" data-name="' + Tools.escapeHTML(oName) + '">(Private to ' + Tools.escapeHTML(pm) + ')</i> ' + Tools.parseMessage(message) + '</span>' +
 					'</div>'
 				);
-				return; // PMs independently notify in the man menu; no need to make them notify again with `inchatpm`.
+				return; // PMs independently notify in the main menu; no need to make them notify again with `inchatpm`.
 			}
 
 			var lastMessageDates = Tools.prefs('logtimes') || (Tools.prefs('logtimes', {}), Tools.prefs('logtimes'));
 			if (!lastMessageDates[Config.server.id]) lastMessageDates[Config.server.id] = {};
 			var lastMessageDate = lastMessageDates[Config.server.id][this.id] || 0;
-			var mayNotify = msgTime > lastMessageDate && userid !== app.user.get('userid');
+			// because the time offset to the server can vary slightly, subtract it to not have it affect comparisons between dates
+			var serverMsgTime = msgTime - (this.timeOffset || 0);
+			var mayNotify = serverMsgTime > lastMessageDate && userid !== app.user.get('userid');
 
 			if (app.focused && (this === app.curSideRoom || this === app.curRoom)) {
 				this.lastMessageDate = 0;
-				lastMessageDates[Config.server.id][this.id] = msgTime;
+				lastMessageDates[Config.server.id][this.id] = serverMsgTime;
 				Storage.prefs.save();
 			} else {
 				// To be saved on focus
-				this.lastMessageDate = Math.max(this.lastMessageDate || 0, msgTime);
+				this.lastMessageDate = Math.max(this.lastMessageDate || 0, serverMsgTime);
 			}
 
 			var isHighlighted = userid !== app.user.get('userid') && this.getHighlight(message);
@@ -1529,34 +1571,6 @@
 			}
 			this.$el.html(buf);
 		},
-		ranks: {
-			'~': 2,
-			'#': 2,
-			'&': 2,
-			'@': 1,
-			'%': 1,
-			'*': 1,
-			'\u2605': 1,
-			'+': 1,
-			' ': 0,
-			'!': 0,
-			'✖': 0,
-			'‽': 0
-		},
-		rankOrder: {
-			'~': 1,
-			'#': 2,
-			'&': 3,
-			'@': 4,
-			'%': 5,
-			'*': 6,
-			'\u2605': 7,
-			'+': 8,
-			' ': 9,
-			'!': 10,
-			'✖': 11,
-			'‽': 12
-		},
 		toggleUserlist: function (e) {
 			e.preventDefault();
 			e.stopPropagation();
@@ -1611,10 +1625,11 @@
 			text += '<li' + (this.room.userForm === userid ? ' class="cur"' : '') + ' id="' + this.room.id + '-userlist-user-' + Tools.escapeHTML(userid) + '">';
 			text += '<button class="userbutton username" data-name="' + Tools.escapeHTML(name) + '">';
 			var group = name.charAt(0);
-			text += '<em class="group' + (this.ranks[group] === 2 ? ' staffgroup' : '') + '">' + Tools.escapeHTML(group) + '</em>';
-			if (group === '~' || group === '&' || group === '#') {
+			var details = Config.groups[group] || {type: 'user'};
+			text += '<em class="group' + (details.group === 2 ? ' staffgroup' : '') + '">' + Tools.escapeHTML(group) + '</em>';
+			if (details.type === 'leadership') {
 				text += '<strong><em style="' + hashColor(userid) + '">' + Tools.escapeHTML(name.substr(1)) + '</em></strong>';
-			} else if (group === '%' || group === '@') {
+			} else if (details.type === 'staff') {
 				text += '<strong style="' + hashColor(userid) + '">' + Tools.escapeHTML(name.substr(1)) + '</strong>';
 			} else {
 				text += '<span style="' + hashColor(userid) + '">' + Tools.escapeHTML(name.substr(1)) + '</span>';
@@ -1640,8 +1655,15 @@
 		},
 		comparator: function (a, b) {
 			if (a === b) return 0;
-			var aRank = (this.rankOrder[this.room.users[a] ? this.room.users[a].substr(0, 1) : ' '] || 6);
-			var bRank = (this.rankOrder[this.room.users[b] ? this.room.users[b].substr(0, 1) : ' '] || 6);
+			var aRank = (
+				Config.groups[(this.room.users[a] ? this.room.users[a].charAt(0) : Config.defaultGroup || ' ')] ||
+				{order: (Config.defaultOrder || 10005.5)}
+			).order;
+			var bRank = (
+				Config.groups[(this.room.users[b] ? this.room.users[b].charAt(0) : Config.defaultGroup || ' ')] ||
+				{order: (Config.defaultOrder || 10005.5)}
+			).order;
+
 			if (aRank !== bRank) return aRank - bRank;
 			return (a > b ? 1 : -1);
 		},
